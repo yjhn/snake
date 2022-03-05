@@ -1,14 +1,13 @@
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent},
-    execute, queue,
     style::Print,
     terminal, ExecutableCommand, QueueableCommand, Result,
 };
 use rand::prelude::*;
 use std::{
     fmt::Write,
-    io::{stdin, stdout, Error, Write as IOWrite},
+    io::{stdout, Error, Write as IOWrite},
     time::Duration,
 };
 
@@ -53,6 +52,8 @@ enum SnakePart {
 const BOARD_WIDTH: usize = 50;
 const BOARD_HEIGHT: usize = 20;
 const STEP_LENGTH: usize = 500;
+const MAX_FOOD_ON_BOARD: usize = 10;
+
 type Board = Vec<Vec<Tile>>;
 type Snake = Vec<SnakeTile>;
 
@@ -85,8 +86,7 @@ struct SnakeTile {
 
 fn main() -> Result<()> {
     let mut out = stdout();
-    let mut rng = rand::thread_rng();
-    let mut snake: Snake = vec![
+    let snake: Snake = vec![
         SnakeTile {
             x: 10,
             y: 10,
@@ -104,14 +104,14 @@ fn main() -> Result<()> {
         },
     ];
 
-    let mut board: Board = vec![vec![Tile::Empty; BOARD_WIDTH]; BOARD_HEIGHT];
+    let board: Board = vec![vec![Tile::Empty; BOARD_WIDTH]; BOARD_HEIGHT];
 
     terminal::enable_raw_mode()?;
     out.queue(terminal::EnterAlternateScreen)?;
     out.queue(cursor::MoveTo(0, 0))?;
     out.flush()?;
 
-    game_loop(snake, board, rng)?;
+    game_loop(snake, board)?;
     print!("Press any key to exit...\r\n");
     let _ = read_char()?;
 
@@ -120,8 +120,9 @@ fn main() -> Result<()> {
         .map(|_| Ok(()))?
 }
 
-fn game_loop(mut snake: Snake, mut board: Board, mut rng: ThreadRng) -> Result<()> {
+fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
     let mut out = stdout();
+    let mut rng = rand::thread_rng();
 
     for _ in 0..5 {
         add_food(&mut board, &mut rng);
@@ -219,8 +220,8 @@ fn get_char(tile: &Tile) -> char {
         Tile::Food(_) => '*',
         Tile::Obstacle => '@',
         Tile::SnakePart(snake_part) => match snake_part {
-            SnakePart::Head(direction) => 'H',
-            SnakePart::Tail(direction) => 'T',
+            SnakePart::Head(_) => 'H',
+            SnakePart::Tail(_) => 'T',
             SnakePart::Body(direction) => match direction {
                 BodyPartDirection::Horizontal => '@',
                 BodyPartDirection::Vertical => '@',
