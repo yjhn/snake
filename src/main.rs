@@ -6,13 +6,14 @@ use crossterm::{
     ExecutableCommand, QueueableCommand, Result,
 };
 use rand::prelude::*;
-use std::time::SystemTime;
 use std::{
     fmt::Write,
     io::{stdout, Write as IOWrite},
+    ops::SubAssign,
     process,
     time::Duration,
 };
+use std::{ops::AddAssign, time::SystemTime};
 
 const BOARD_WIDTH: usize = 50;
 const BOARD_HEIGHT: usize = 20;
@@ -69,72 +70,99 @@ type Snake = Vec<SnakeTile>;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 struct SnakeTile {
-    x: usize,
-    y: usize,
+    x: Wrap,
+    y: Wrap,
     snake_tile_type: SnakePart,
     eating: bool,
 }
 
-/*struct Wrap {
-    modulus: u16,
-    number: u16,
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct Wrap {
+    modulus: usize,
+    number: usize,
 }
 
-impl AddAssign<u8> for Wrap {
-    fn add_assign(&mut self, rhs: u8) {}
-}*/
+impl Wrap {
+    fn new(number: usize, modulus: usize) -> Self {
+        Self {
+            modulus,
+            number: number % modulus,
+        }
+    }
+}
 
-/* snake tiles need to
- 1. have some way of knowing where they are moving - include direction in the tile
- 2. whether they are corner tiles - need to somehow know the tile ahead,
-    then the tile can adopt tile type of the tile ahead of it
-          (maybe a Vec of all snake tiles with positions and all?)
- then snake tiles don't need to be stored in the general buffer and only need to be
- added before printing to the screen -- this could cause performance issues with huge snakes
-*/
+// only supports += 1
+impl AddAssign<usize> for Wrap {
+    fn add_assign(&mut self, rhs: usize) {
+        self.number = if self.number + rhs == self.modulus {
+            0
+        } else {
+            self.number + rhs
+        }
+    }
+}
+
+impl SubAssign<usize> for Wrap {
+    fn sub_assign(&mut self, rhs: usize) {
+        self.number = if self.number as isize - rhs as isize == -1 {
+            self.modulus - 1
+        } else {
+            self.number - rhs
+        }
+    }
+}
+
+impl From<Wrap> for usize {
+    fn from(w: Wrap) -> Self {
+        w.number
+    }
+}
 
 fn main() -> Result<()> {
     let mut out = stdout();
+    let width = BOARD_WIDTH;
+    let height = BOARD_HEIGHT;
+
     let snake: Snake = vec![
         SnakeTile {
-            x: 10,
-            y: 10,
+            x: Wrap::new(10, width),
+            y: Wrap::new(10, height),
             snake_tile_type: SnakePart::Head(Direction::Left),
             eating: false,
         },
         SnakeTile {
-            x: 11,
-            y: 10,
+            x: Wrap::new(11, width),
+            y: Wrap::new(10, height),
             snake_tile_type: SnakePart::Body(BodyPartDirection::TopRightCornerLeft),
             eating: false,
         },
         SnakeTile {
-            x: 11,
-            y: 11,
+            x: Wrap::new(11, width),
+            y: Wrap::new(11, height),
             snake_tile_type: SnakePart::Body(BodyPartDirection::Up),
             eating: false,
         },
         SnakeTile {
-            x: 11,
-            y: 12,
+            x: Wrap::new(11, width),
+            y: Wrap::new(12, height),
             snake_tile_type: SnakePart::Body(BodyPartDirection::Up),
             eating: false,
         },
         SnakeTile {
-            x: 11,
-            y: 13,
+            x: Wrap::new(11, width),
+            y: Wrap::new(13, height),
             snake_tile_type: SnakePart::Body(BodyPartDirection::BottomLeftCornerUp),
             eating: false,
         },
         SnakeTile {
-            x: 12,
-            y: 13,
+            x: Wrap::new(12, width),
+            y: Wrap::new(13, height),
             snake_tile_type: SnakePart::Tail(Direction::Left),
             eating: false,
         },
     ];
 
-    let board: Board = vec![vec![Tile::Empty; BOARD_WIDTH]; BOARD_HEIGHT];
+    let board: Board = vec![vec![Tile::Empty; width]; height];
 
     out.queue(cursor::Hide)?;
     out.queue(terminal::EnterAlternateScreen)?;
@@ -189,60 +217,57 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
         std::thread::sleep(GAME_STEP_LENGTH);
 
         process_input(head_direction)?;
-        snake = move_snake(&board, snake, board[0].len(), board.len());
+        snake = move_snake(&board, snake);
     }
 }
 
 fn add_snake_to_board(board: &mut Board, snake: &Snake) {
     for tile in snake {
-        board[tile.y][tile.x] = Tile::SnakePart(tile.snake_tile_type, tile.eating);
+        board[usize::from(tile.y)][usize::from(tile.x)] =
+            Tile::SnakePart(tile.snake_tile_type, tile.eating);
     }
 }
 
 fn remove_snake_from_board(board: &mut Board, snake: &Snake) {
     for tile in snake {
-        board[tile.y][tile.x] = Tile::Empty;
+        board[usize::from(tile.y)][usize::from(tile.x)] = Tile::Empty;
     }
 }
 
 // player controls already applied to the head
 // snake wraps around board edges
 // TODO: handle eating
-fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake {
+fn move_snake(board: &Board, snake: Snake) -> Snake {
     let mut res = Vec::<SnakeTile>::with_capacity(snake.len());
 
     // process snake head
     let head = snake[0];
     let SnakeTile {
         snake_tile_type,
-        x,
-        y,
+        mut x,
+        mut y,
         eating: _eating,
     } = head;
-    let mut sx = x as isize;
-    let mut sy = y as isize;
     match snake_tile_type {
         SnakePart::Head(direction) => match direction {
-            Direction::Up => sy -= 1,
-            Direction::Right => sx += 1,
-            Direction::Down => sy += 1,
-            Direction::Left => sx -= 1,
+            Direction::Up => y -= 1,
+            Direction::Right => x += 1,
+            Direction::Down => y += 1,
+            Direction::Left => x -= 1,
         },
         _ => unreachable!(),
     };
-    let eating = if board[wrap_y(sy, height)][wrap_x(sx, width)] == Tile::Food(FoodType::Blob) {
+    let eating = if board[usize::from(y)][usize::from(x)] == Tile::Food(FoodType::Blob) {
         true
     } else {
         false
     };
-    res.push(make_snake_tile(
+    res.push(SnakeTile {
+        x,
+        y,
         snake_tile_type,
-        sx,
-        sy,
         eating,
-        width,
-        height,
-    ));
+    });
 
     for i in 1..(snake.len() - 1) {
         let previous_tile = snake[i - 1];
@@ -251,12 +276,10 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
         let tile = snake[i];
         let SnakeTile {
             mut snake_tile_type,
-            x,
-            y,
+            mut x,
+            mut y,
             eating: _eating,
         } = tile;
-        let mut x = x as isize;
-        let mut y = y as isize;
 
         match snake_tile_type {
             SnakePart::Body(ref mut direction) => match direction {
@@ -329,46 +352,38 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
             SnakePart::Head(_) => unreachable!(),
         }
 
-        res.push(make_snake_tile(
-            snake_tile_type,
+        res.push(SnakeTile {
             x,
             y,
-            previous_tile_eating,
-            width,
-            height,
-        ));
+            snake_tile_type,
+            eating: previous_tile_eating,
+        });
     }
 
     let previous_tile = snake[snake.len() - 2];
-    let previous_tile_type = previous_tile.snake_tile_type;
-    let previous_tile_eating = previous_tile.eating;
     let tile = snake[snake.len() - 1];
     let SnakeTile {
         mut snake_tile_type,
-        x,
-        y,
+        mut x,
+        mut y,
         eating: _eating,
     } = tile;
-    let mut x = x as isize;
-    let mut y = y as isize;
     if snake[snake.len() - 1].eating {
         // TODO: lengthen the snake
 
-        res.push(make_snake_tile(
-            previous_tile.snake_tile_type,
-            previous_tile.x as isize,
-            previous_tile.y as isize,
-            previous_tile_eating,
-            width,
-            height,
-        ));
-        res.push(make_snake_tile(snake_tile_type, x, y, false, width, height));
+        res.push(previous_tile);
+        res.push(SnakeTile {
+            x,
+            y,
+            snake_tile_type,
+            eating: false,
+        });
     } else {
         match snake_tile_type {
             SnakePart::Tail(ref mut direction) => match direction {
                 Direction::Up => {
                     y -= 1;
-                    match previous_tile_type {
+                    match previous_tile.snake_tile_type {
                         SnakePart::Body(dir) => match dir {
                             BodyPartDirection::Up => (),
                             BodyPartDirection::TopLeftCornerRight => *direction = Direction::Right,
@@ -380,7 +395,7 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
                 }
                 Direction::Right => {
                     x += 1;
-                    match previous_tile_type {
+                    match previous_tile.snake_tile_type {
                         SnakePart::Body(dir) => match dir {
                             BodyPartDirection::Right => (),
                             BodyPartDirection::BottomRightCornerUp => *direction = Direction::Up,
@@ -392,7 +407,7 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
                 }
                 Direction::Down => {
                     y += 1;
-                    match previous_tile_type {
+                    match previous_tile.snake_tile_type {
                         SnakePart::Body(dir) => match dir {
                             BodyPartDirection::Down => (),
                             BodyPartDirection::BottomLeftCornerRight => {
@@ -408,7 +423,7 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
                 }
                 Direction::Left => {
                     x -= 1;
-                    match previous_tile_type {
+                    match previous_tile.snake_tile_type {
                         SnakePart::Body(dir) => match dir {
                             BodyPartDirection::Left => (),
                             BodyPartDirection::BottomLeftCornerUp => *direction = Direction::Up,
@@ -422,20 +437,18 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
             _ => unreachable!(),
         }
 
-        res.push(make_snake_tile(
-            snake_tile_type,
+        res.push(SnakeTile {
             x,
             y,
-            previous_tile_eating,
-            width,
-            height,
-        ));
+            snake_tile_type,
+            eating: previous_tile.eating,
+        });
     }
 
     res
 }
 
-fn make_snake_tile(
+/*fn make_snake_tile(
     snake_tile_type: SnakePart,
     x: isize,
     y: isize,
@@ -479,7 +492,7 @@ fn wrap_y(y: isize, height: usize) -> usize {
             y
         }
     }
-}
+}*/
 
 fn process_input(head_direction: &mut Direction) -> Result<()> {
     if event::poll(Duration::ZERO /*from_millis(10)*/)? {
