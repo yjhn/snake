@@ -2,7 +2,8 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent},
     style::Print,
-    terminal, ExecutableCommand, QueueableCommand, Result,
+    terminal::{self, ClearType},
+    ExecutableCommand, QueueableCommand, Result,
 };
 use rand::prelude::*;
 use std::{
@@ -51,7 +52,7 @@ enum SnakePart {
 
 const BOARD_WIDTH: usize = 50;
 const BOARD_HEIGHT: usize = 20;
-const STEP_LENGTH: usize = 500;
+const GAME_STEP_LENGTH: u64 = 500;
 const MAX_FOOD_ON_BOARD: usize = 10;
 
 type Board = Vec<Vec<Tile>>;
@@ -112,8 +113,6 @@ fn main() -> Result<()> {
     out.flush()?;
 
     game_loop(snake, board)?;
-    print!("Press any key to exit...\r\n");
-    let _ = read_char()?;
 
     terminal::disable_raw_mode()?;
     out.execute(terminal::LeaveAlternateScreen)
@@ -124,14 +123,16 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
     let mut out = stdout();
     let mut rng = rand::thread_rng();
 
-    for _ in 0..5 {
-        add_food(&mut board, &mut rng);
+    loop {
+        for _ in 0..5 {
+            add_food(&mut board, &mut rng);
+        }
+        add_snake_to_board(&mut board, &snake);
+        draw(&board, &mut out)?;
+        // to listen to button presses, better use non-blocking IO with poll
+        // it will also sleep the program for the right duration
+        std::thread::sleep(Duration::from_millis(GAME_STEP_LENGTH));
     }
-    add_snake_to_board(&mut board, &snake);
-    draw(&board, &mut out)?;
-    // std::thread::sleep(Duration::new(2, 0));
-
-    Ok(())
 }
 
 fn add_snake_to_board(board: &mut Board, snake: &Snake) {
@@ -188,6 +189,9 @@ fn add_food(board: &mut Board, rng: &mut ThreadRng) {
 }
 
 fn draw(board: &Board, out: &mut impl IOWrite) -> Result<()> {
+    out.queue(terminal::Clear(ClearType::All))?;
+    out.queue(cursor::MoveTo(0, 0))?;
+
     // let height = board.len();
     let width = board[0].len();
 
@@ -207,7 +211,7 @@ fn draw(board: &Board, out: &mut impl IOWrite) -> Result<()> {
     }
 
     // bottom line
-    out.queue(Print(format!("{top}\r\n")))?;
+    out.queue(Print(format!("{top}\r\nPress any key to exit...")))?;
     out.flush()?;
 
     Ok(())
