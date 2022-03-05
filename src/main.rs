@@ -116,15 +116,16 @@ fn main() -> Result<()> {
     // board[0][2] = Tile::SnakeHead(false);
 
     terminal::enable_raw_mode()?;
-    let key_pressed = read_char()?;
-    println!("aaaaaaaaaaa");
+    // let key_pressed = read_char()?;
+    // println!("aaaaaaaaaaa");
     // queue!(stdout(), cursor::Hide)?;
     out.queue(terminal::EnterAlternateScreen)?;
+    out.queue(cursor::MoveTo(0, 0))?;
     out.flush()?;
     //draw(&board);
     // std::thread::sleep(Duration::new(2, 0));
 
-    println!("labas");
+    print!("labas\r\n");
     let key_pressed = read_char()?;
     let key_pressed = read_char()?;
     let key_pressed = read_char()?;
@@ -146,15 +147,18 @@ fn read_char() -> Result<char> {
 
     match event::read()? {
         Event::Key(KeyEvent { code: key, .. }) => match key {
-            KeyCode::Char(c) => Ok(c),
+            KeyCode::Char(c) => {
+                print!("input: {c}\r\n");
+                Ok(c)
+            }
             _ => Ok('e'),
         },
         Event::Mouse(_) => {
-            println!("mouse event");
+            print!("mouse event\r\n");
             Ok('m')
         }
         Event::Resize(x, y) => {
-            println!("new size: {x}, {y}");
+            print!("new size: {x}, {y}\r\n");
             Ok('r')
         }
     }
