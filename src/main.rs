@@ -1,7 +1,9 @@
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent},
-    execute, queue, terminal, ExecutableCommand, QueueableCommand, Result,
+    execute, queue,
+    style::Print,
+    terminal, ExecutableCommand, QueueableCommand, Result,
 };
 use rand::prelude::*;
 use std::{
@@ -48,7 +50,7 @@ enum Snake {
     Tail(Direction),
 }
 
-const BOARD_WIDTH: u16 = 20;
+const BOARD_WIDTH: u16 = 50;
 const BOARD_HEIGHT: u16 = 20;
 
 impl Direction {
@@ -121,13 +123,12 @@ fn main() -> Result<()> {
     // queue!(stdout(), cursor::Hide)?;
     out.queue(terminal::EnterAlternateScreen)?;
     out.queue(cursor::MoveTo(0, 0))?;
+    out.queue(Print("printed\r\n"))?;
     out.flush()?;
-    //draw(&board);
+    draw(&board, &mut out);
     // std::thread::sleep(Duration::new(2, 0));
 
-    print!("labas\r\n");
-    let key_pressed = read_char()?;
-    let key_pressed = read_char()?;
+    print!("Press any key to exit...\r\n");
     let key_pressed = read_char()?;
 
     // std::thread::sleep(Duration::new(10, 0));
@@ -148,6 +149,8 @@ fn read_char() -> Result<char> {
     match event::read()? {
         Event::Key(KeyEvent { code: key, .. }) => match key {
             KeyCode::Char(c) => {
+                // \r - return to line start
+                // \n - start a new line
                 print!("input: {c}\r\n");
                 Ok(c)
             }
@@ -188,26 +191,29 @@ fn add_food(board: &mut Vec<Vec<Tile>>, rng: &mut ThreadRng) {
     }
 }
 
-fn draw(board: &Vec<Vec<Tile>>) {
+fn draw(board: &Vec<Vec<Tile>>, out: &mut impl IOWrite) -> Result<()> {
     // let height = board.len();
     let width = board[0].len();
 
     // print the top line of the board
     let top = "-".repeat(width + 2);
-    println!("{}", top);
+    out.queue(Print(format!("{top}\r\n")))?;
 
     for row in board {
-        println!(
-            "|{}|",
+        out.queue(Print(format!(
+            "|{}|\r\n",
             row.iter()
                 .fold(String::with_capacity(width), |mut line, tile| {
                     write!(&mut line, "{}", get_char(tile)).unwrap();
                     line
                 })
-        );
+        )))?;
     }
 
-    println!("{}", top);
+    out.queue(Print(format!("{top}\r\n")))?;
+    out.flush()?;
+
+    Ok(())
 }
 
 // snake is drawn using Box Drawing Unicode char block
