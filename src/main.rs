@@ -53,7 +53,7 @@ enum SnakePart {
 const BOARD_WIDTH: usize = 50;
 const BOARD_HEIGHT: usize = 20;
 const GAME_STEP_LENGTH: u64 = 500;
-const MAX_FOOD_ON_BOARD: usize = 10;
+const MAX_FOOD_ON_BOARD: u32 = 20;
 
 type Board = Vec<Vec<Tile>>;
 type Snake = Vec<SnakeTile>;
@@ -129,9 +129,18 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
         }
         add_snake_to_board(&mut board, &snake);
         draw(&board, &mut out)?;
-        // to listen to button presses, better use non-blocking IO with poll
+        remove_snake_from_board(&mut board, &snake);
+        // to listen to button presses, use non-blocking IO with poll
         // it will also sleep the program for the right duration
-        std::thread::sleep(Duration::from_millis(GAME_STEP_LENGTH));
+        match read_char_non_blocking()? {
+            Some(c) => match c {
+                'q' => return Ok(()),
+                _ => {
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            },
+            None => (),
+        }
     }
 }
 
@@ -141,7 +150,35 @@ fn add_snake_to_board(board: &mut Board, snake: &Snake) {
     }
 }
 
-fn read_char() -> Result<char> {
+fn remove_snake_from_board(board: &mut Board, snake: &Snake) {
+    for tile in snake {
+        board[tile.y][tile.x] = Tile::Empty;
+    }
+}
+
+// snake wraps around board edges
+fn move_snake(snake: &mut Snake) {
+    for tile in snake {
+        let SnakeTile {
+            snake_tile_type: mut tile_type,
+            mut x,
+            mut y,
+        } = *tile;
+        match tile_type {
+            SnakePart::Head(direction) => match direction {
+                _ => todo!(),
+            },
+            SnakePart::Body(direction) => match direction {
+                _ => todo!(),
+            },
+            SnakePart::Tail(direction) => match direction {
+                _ => todo!(),
+            },
+        }
+    }
+}
+
+fn read_char_blocking() -> Result<char> {
     match event::read()? {
         Event::Key(KeyEvent { code: key, .. }) => match key {
             KeyCode::Char(c) => {
@@ -163,9 +200,39 @@ fn read_char() -> Result<char> {
     }
 }
 
+fn read_char_non_blocking() -> Result<Option<char>> {
+    if event::poll(Duration::from_millis(GAME_STEP_LENGTH))? {
+        match event::read()? {
+            Event::Key(KeyEvent { code: key, .. }) => match key {
+                KeyCode::Char(c) => {
+                    // \r - return to line start
+                    // \n - start a new line
+                    print!("input: {c}\r\n");
+                    Ok(Some(c))
+                }
+                _ => Ok(Some('e')),
+            },
+            Event::Mouse(_) => {
+                print!("mouse event\r\n");
+                Ok(Some('m'))
+            }
+            Event::Resize(x, y) => {
+                print!("new size: {x}, {y}\r\n");
+                Ok(Some('r'))
+            }
+        }
+    } else {
+        Ok(None)
+    }
+}
+
 // adds one food particle at random location
 // food is only added to empty tile
 fn add_food(board: &mut Board, rng: &mut ThreadRng) {
+    if count_food(&board) >= MAX_FOOD_ON_BOARD {
+        return;
+    }
+
     let height = board.len();
     let width = board[0].len();
     let (a, b): (usize, usize) = rng.gen();
@@ -186,6 +253,16 @@ fn add_food(board: &mut Board, rng: &mut ThreadRng) {
 
         board[y][x] = Tile::Food(FoodType::Blob);
     }
+}
+
+fn count_food(board: &Board) -> u32 {
+    board.iter().flatten().fold(0, |count, tile| {
+        if *tile == Tile::Food(FoodType::Blob) {
+            count + 1
+        } else {
+            count
+        }
+    })
 }
 
 fn draw(board: &Board, out: &mut impl IOWrite) -> Result<()> {
