@@ -6,12 +6,15 @@ use crossterm::{
     ExecutableCommand, QueueableCommand, Result,
 };
 use rand::prelude::*;
-use std::time::SystemTime;
 use std::{
     fmt::Write,
     io::{stdout, Write as IOWrite},
     process,
     time::Duration,
+};
+use std::{
+    ops::{Add, AddAssign},
+    time::SystemTime,
 };
 
 const BOARD_WIDTH: usize = 50;
@@ -74,6 +77,15 @@ struct SnakeTile {
     snake_tile_type: SnakePart,
     eating: bool,
 }
+
+/*struct Wrap {
+    modulus: u16,
+    number: u16,
+}
+
+impl AddAssign<u8> for Wrap {
+    fn add_assign(&mut self, rhs: u8) {}
+}*/
 
 /* snake tiles need to
  1. have some way of knowing where they are moving - include direction in the tile
@@ -147,17 +159,27 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
     let mut rng = rand::thread_rng();
     let mut timer;
     let mut step_time = Duration::ZERO;
+    let mut eaten = 0;
 
     loop {
         timer = SystemTime::now();
         for _ in 0..5 {
             add_food(&mut board, &mut rng);
         }
+        if snake[0].eating {
+            eaten += 1;
+        }
         add_snake_to_board(&mut board, &snake);
         draw(
             &board,
             &mut out,
-            &format!("step time: {} us", step_time.as_micros()),
+            &format!(
+                "step time: {} us\n\r\
+            snake length: {}\n\r\
+            food eaten: {eaten}",
+                step_time.as_micros(),
+                snake.len()
+            ),
         )?;
         remove_snake_from_board(&mut board, &snake);
         let head_direction = match snake[0].snake_tile_type {
@@ -211,7 +233,7 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
         },
         _ => unreachable!(),
     };
-    let eating = if board[sy as usize][sx as usize] == Tile::Food(FoodType::Blob) {
+    let eating = if board[wrap_y(sy, height)][wrap_x(sx, width)] == Tile::Food(FoodType::Blob) {
         true
     } else {
         false
@@ -225,7 +247,7 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
         height,
     ));
 
-    for i in 1..snake.len() {
+    for i in 1..(snake.len() - 1) {
         let previous_tile = snake[i - 1];
         let previous_tile_type = previous_tile.snake_tile_type;
         let previous_tile_eating = previous_tile.eating;
@@ -306,6 +328,46 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
                     }
                 }
             },
+            SnakePart::Tail(_) => unreachable!(),
+            SnakePart::Head(_) => unreachable!(),
+        }
+
+        res.push(make_snake_tile(
+            snake_tile_type,
+            x,
+            y,
+            previous_tile_eating,
+            width,
+            height,
+        ));
+    }
+
+    let previous_tile = snake[snake.len() - 2];
+    let previous_tile_type = previous_tile.snake_tile_type;
+    let previous_tile_eating = previous_tile.eating;
+    let tile = snake[snake.len() - 1];
+    let SnakeTile {
+        mut snake_tile_type,
+        x,
+        y,
+        eating: _eating,
+    } = tile;
+    let mut x = x as isize;
+    let mut y = y as isize;
+    if snake[snake.len() - 1].eating {
+        // TODO: lengthen the snake
+
+        res.push(make_snake_tile(
+            previous_tile.snake_tile_type,
+            previous_tile.x as isize,
+            previous_tile.y as isize,
+            previous_tile_eating,
+            width,
+            height,
+        ));
+        res.push(make_snake_tile(snake_tile_type, x, y, false, width, height));
+    } else {
+        match snake_tile_type {
             SnakePart::Tail(ref mut direction) => match direction {
                 Direction::Up => {
                     y -= 1;
@@ -360,7 +422,7 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
                     }
                 }
             },
-            SnakePart::Head(_) => unreachable!(),
+            _ => unreachable!(),
         }
 
         res.push(make_snake_tile(
@@ -371,9 +433,6 @@ fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake
             width,
             height,
         ));
-    }
-    if snake[snake.len() - 1].eating {
-        // TODO: lengthen the snake
     }
 
     res
@@ -388,26 +447,8 @@ fn make_snake_tile(
     height: usize,
 ) -> SnakeTile {
     // wrap snake around edges
-    let x = if x == -1 {
-        width - 1
-    } else {
-        let x = x as usize;
-        if x == width {
-            0
-        } else {
-            x
-        }
-    };
-    let y = if y == -1 {
-        height - 1
-    } else {
-        let y = y as usize;
-        if y == height {
-            0
-        } else {
-            y
-        }
-    };
+    let x = wrap_x(x, width);
+    let y = wrap_y(y, height);
 
     SnakeTile {
         snake_tile_type,
@@ -417,7 +458,32 @@ fn make_snake_tile(
     }
 }
 
-// TODO: read arrow keys
+fn wrap_x(x: isize, width: usize) -> usize {
+    if x == -1 {
+        width - 1
+    } else {
+        let x = x as usize;
+        if x == width {
+            0
+        } else {
+            x
+        }
+    }
+}
+
+fn wrap_y(y: isize, height: usize) -> usize {
+    if y == -1 {
+        height - 1
+    } else {
+        let y = y as usize;
+        if y == height {
+            0
+        } else {
+            y
+        }
+    }
+}
+
 fn process_input(head_direction: &mut Direction) -> Result<()> {
     if event::poll(Duration::ZERO /*from_millis(10)*/)? {
         match event::read()? {
@@ -582,12 +648,6 @@ fn get_char(tile: &Tile) -> char {
                 BodyPartDirection::BottomRightCornerLeft => '┛',
                 BodyPartDirection::BottomRightCornerUp => '┛',
             },
-            // BodyPartDirection::Horizontal => '━',
-            // BodyPartDirection::Vertical => '┃',
-            // BodyPartDirection::TopLeftCorner => '┏',
-            // BodyPartDirection::TopRightCorner => '┓',
-            // BodyPartDirection::BottomLeftCorner => '┗',
-            // BodyPartDirection::BottomRightCorner => '┛',
         },
     }
 }
