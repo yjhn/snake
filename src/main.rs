@@ -48,7 +48,7 @@ enum BodyPartDirection {
 enum Tile {
     Empty,
     Food(FoodType), // variable is for the type of food
-    Obstacle,
+    //Obstacle,
     SnakePart(SnakePart),
 }
 
@@ -67,22 +67,12 @@ enum SnakePart {
 type Board = Vec<Vec<Tile>>;
 type Snake = Vec<SnakeTile>;
 
-impl Direction {
-    fn opposite_direction(&self) {
-        match self {
-            Self::Up => Direction::Down,
-            Self::Right => Direction::Left,
-            Self::Down => Direction::Up,
-            Self::Left => Direction::Right,
-        };
-    }
-}
-
 #[derive(Debug, PartialEq, Clone, Copy)]
 struct SnakeTile {
     x: usize,
     y: usize,
     snake_tile_type: SnakePart,
+    eating: bool,
 }
 
 /* snake tiles need to
@@ -101,31 +91,37 @@ fn main() -> Result<()> {
             x: 10,
             y: 10,
             snake_tile_type: SnakePart::Head(Direction::Left),
+            eating: false,
         },
         SnakeTile {
             x: 11,
             y: 10,
             snake_tile_type: SnakePart::Body(BodyPartDirection::TopRightCornerLeft),
+            eating: false,
         },
         SnakeTile {
             x: 11,
             y: 11,
             snake_tile_type: SnakePart::Body(BodyPartDirection::Up),
+            eating: false,
         },
         SnakeTile {
             x: 11,
             y: 12,
             snake_tile_type: SnakePart::Body(BodyPartDirection::Up),
+            eating: false,
         },
         SnakeTile {
             x: 11,
             y: 13,
             snake_tile_type: SnakePart::Body(BodyPartDirection::BottomLeftCornerUp),
+            eating: false,
         },
         SnakeTile {
             x: 12,
             y: 13,
             snake_tile_type: SnakePart::Tail(Direction::Left),
+            eating: false,
         },
     ];
 
@@ -140,8 +136,8 @@ fn main() -> Result<()> {
     game_loop(snake, board)?;
 
     terminal::disable_raw_mode()?;
-    out.execute(terminal::LeaveAlternateScreen)?;
     out.queue(cursor::Show)?;
+    out.execute(terminal::LeaveAlternateScreen)?;
 
     Ok(())
 }
@@ -164,7 +160,6 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
             &format!("step time: {} us", step_time.as_micros()),
         )?;
         remove_snake_from_board(&mut board, &snake);
-        snake = move_snake(snake, board[0].len(), board.len());
         let head_direction = match snake[0].snake_tile_type {
             SnakePart::Head(ref mut direction) => direction,
             _ => unreachable!(),
@@ -172,9 +167,10 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
         step_time = timer.elapsed().unwrap();
         // to listen to button presses, use non-blocking IO with poll
         // it will also sleep the program for the right duration
-        // std::thread::sleep(Duration::from_millis(GAME_STEP_LENGTH));
+        std::thread::sleep(GAME_STEP_LENGTH);
 
-        process_input(head_direction)?
+        process_input(head_direction)?;
+        snake = move_snake(&board, snake, board[0].len(), board.len());
     }
 }
 
@@ -192,7 +188,8 @@ fn remove_snake_from_board(board: &mut Board, snake: &Snake) {
 
 // player controls already applied to the head
 // snake wraps around board edges
-fn move_snake(snake: Snake, width: usize, height: usize) -> Snake {
+// TODO: handle eating
+fn move_snake(board: &Board, snake: Snake, width: usize, height: usize) -> Snake {
     let mut res = Vec::<SnakeTile>::with_capacity(snake.len());
 
     // process snake head
@@ -201,27 +198,43 @@ fn move_snake(snake: Snake, width: usize, height: usize) -> Snake {
         snake_tile_type,
         x,
         y,
+        eating: _eating,
     } = head;
-    let mut x = x as isize;
-    let mut y = y as isize;
+    let mut sx = x as isize;
+    let mut sy = y as isize;
     match snake_tile_type {
         SnakePart::Head(direction) => match direction {
-            Direction::Up => y -= 1,
-            Direction::Right => x += 1,
-            Direction::Down => y += 1,
-            Direction::Left => x -= 1,
+            Direction::Up => sy -= 1,
+            Direction::Right => sx += 1,
+            Direction::Down => sy += 1,
+            Direction::Left => sx -= 1,
         },
         _ => unreachable!(),
     };
-    res.push(make_snake_tile(snake_tile_type, x, y, width, height));
+    let eating = if board[sy as usize][sx as usize] == Tile::Food(FoodType::Blob) {
+        true
+    } else {
+        false
+    };
+    res.push(make_snake_tile(
+        snake_tile_type,
+        sx,
+        sy,
+        eating,
+        width,
+        height,
+    ));
 
     for i in 1..snake.len() {
-        let previous_tile_type = snake[i - 1].snake_tile_type;
+        let previous_tile = snake[i - 1];
+        let previous_tile_type = previous_tile.snake_tile_type;
+        let previous_tile_eating = previous_tile.eating;
         let tile = snake[i];
         let SnakeTile {
             mut snake_tile_type,
             x,
             y,
+            eating: _eating,
         } = tile;
         let mut x = x as isize;
         let mut y = y as isize;
@@ -350,7 +363,17 @@ fn move_snake(snake: Snake, width: usize, height: usize) -> Snake {
             SnakePart::Head(_) => unreachable!(),
         }
 
-        res.push(make_snake_tile(snake_tile_type, x, y, width, height));
+        res.push(make_snake_tile(
+            snake_tile_type,
+            x,
+            y,
+            previous_tile_eating,
+            width,
+            height,
+        ));
+    }
+    if snake[snake.len() - 1].eating {
+        // TODO: lengthen the snake
     }
 
     res
@@ -360,6 +383,7 @@ fn make_snake_tile(
     snake_tile_type: SnakePart,
     x: isize,
     y: isize,
+    eating: bool,
     width: usize,
     height: usize,
 ) -> SnakeTile {
@@ -389,12 +413,13 @@ fn make_snake_tile(
         snake_tile_type,
         x,
         y,
+        eating,
     }
 }
 
 // TODO: read arrow keys
 fn process_input(head_direction: &mut Direction) -> Result<()> {
-    if event::poll(GAME_STEP_LENGTH)? {
+    if event::poll(Duration::ZERO /*from_millis(10)*/)? {
         match event::read()? {
             Event::Key(KeyEvent { code: key, .. }) => match key {
                 KeyCode::Char(c) => {
@@ -441,6 +466,7 @@ fn process_input(head_direction: &mut Direction) -> Result<()> {
             },
             Event::Resize(x, y) => {
                 print!("new terminal size: {x}, {y}\n\r");
+                std::thread::sleep(Duration::from_secs(1));
             }
             Event::Mouse(_) => unreachable!("disabled in crossterm by default"),
         }
@@ -528,10 +554,20 @@ fn get_char(tile: &Tile) -> char {
     match *tile {
         Tile::Empty => ' ',
         Tile::Food(_) => '*',
-        Tile::Obstacle => '@',
+        // Tile::Obstacle => '@',
         Tile::SnakePart(snake_part) => match snake_part {
-            SnakePart::Head(_) => 'H',
-            SnakePart::Tail(_) => 'T',
+            SnakePart::Head(direction) => match direction {
+                Direction::Right => '>',
+                Direction::Left => '<',
+                Direction::Up => '⌃',
+                Direction::Down => '⌄',
+            },
+            SnakePart::Tail(direction) => match direction {
+                Direction::Right => '>',
+                Direction::Left => '<',
+                Direction::Up => '⌃',
+                Direction::Down => '⌄',
+            },
             SnakePart::Body(direction) => match direction {
                 BodyPartDirection::Up => '┃',
                 BodyPartDirection::Down => '┃',
