@@ -6,11 +6,19 @@ use crossterm::{
     ExecutableCommand, QueueableCommand, Result,
 };
 use rand::prelude::*;
+use std::time::SystemTime;
 use std::{
     fmt::Write,
     io::{stdout, Write as IOWrite},
+    process,
     time::Duration,
 };
+
+const BOARD_WIDTH: usize = 50;
+const BOARD_HEIGHT: usize = 20;
+const STEP_LENGTH: u64 = 300;
+const GAME_STEP_LENGTH: Duration = Duration::from_millis(STEP_LENGTH);
+const MAX_FOOD_ON_BOARD: u32 = 20;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Direction {
@@ -55,11 +63,6 @@ enum SnakePart {
     Body(BodyPartDirection),
     Tail(Direction),
 }
-
-const BOARD_WIDTH: usize = 50;
-const BOARD_HEIGHT: usize = 20;
-const GAME_STEP_LENGTH: u64 = 500;
-const MAX_FOOD_ON_BOARD: u32 = 20;
 
 type Board = Vec<Vec<Tile>>;
 type Snake = Vec<SnakeTile>;
@@ -128,52 +131,50 @@ fn main() -> Result<()> {
 
     let board: Board = vec![vec![Tile::Empty; BOARD_WIDTH]; BOARD_HEIGHT];
 
-    terminal::enable_raw_mode()?;
+    out.queue(cursor::Hide)?;
     out.queue(terminal::EnterAlternateScreen)?;
+    terminal::enable_raw_mode()?;
     out.queue(cursor::MoveTo(0, 0))?;
     out.flush()?;
 
     game_loop(snake, board)?;
 
     terminal::disable_raw_mode()?;
-    out.execute(terminal::LeaveAlternateScreen)
-        .map(|_| Ok(()))?
+    out.execute(terminal::LeaveAlternateScreen)?;
+    out.queue(cursor::Show)?;
+
+    Ok(())
 }
 
 fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
     let mut out = stdout();
     let mut rng = rand::thread_rng();
+    let mut timer;
+    let mut step_time = Duration::ZERO;
 
     loop {
+        timer = SystemTime::now();
         for _ in 0..5 {
             add_food(&mut board, &mut rng);
         }
         add_snake_to_board(&mut board, &snake);
-        draw(&board, &mut out)?;
+        draw(
+            &board,
+            &mut out,
+            &format!("step time: {} us", step_time.as_micros()),
+        )?;
         remove_snake_from_board(&mut board, &snake);
         snake = move_snake(snake, board[0].len(), board.len());
-        let head_direction: &mut Direction;
-        match snake[0].snake_tile_type {
-            SnakePart::Head(ref mut direction) => head_direction = direction,
+        let head_direction = match snake[0].snake_tile_type {
+            SnakePart::Head(ref mut direction) => direction,
             _ => unreachable!(),
-        }
+        };
+        step_time = timer.elapsed().unwrap();
         // to listen to button presses, use non-blocking IO with poll
         // it will also sleep the program for the right duration
-        match read_char_non_blocking()? {
-            Some(c) => match c {
-                'q' => return Ok(()),
-                // TODO: process user controls
-                'w' if *head_direction != Direction::Down => *head_direction = Direction::Up,
-                'a' if *head_direction != Direction::Right => *head_direction = Direction::Left,
-                's' if *head_direction != Direction::Up => *head_direction = Direction::Down,
-                'd' if *head_direction != Direction::Left => *head_direction = Direction::Right,
-                _ => {
-                    print!("\r\nUnknown input.\r\n");
-                    std::thread::sleep(Duration::from_secs(1));
-                }
-            },
-            None => (),
-        }
+        // std::thread::sleep(Duration::from_millis(GAME_STEP_LENGTH));
+
+        process_input(head_direction)?
     }
 }
 
@@ -367,7 +368,7 @@ fn make_snake_tile(
         width - 1
     } else {
         let x = x as usize;
-        if x == width + 1 {
+        if x == width {
             0
         } else {
             x
@@ -377,7 +378,7 @@ fn make_snake_tile(
         height - 1
     } else {
         let y = y as usize;
-        if y == height + 1 {
+        if y == height {
             0
         } else {
             y
@@ -391,53 +392,61 @@ fn make_snake_tile(
     }
 }
 
-fn read_char_blocking() -> Result<char> {
-    match event::read()? {
-        Event::Key(KeyEvent { code: key, .. }) => match key {
-            KeyCode::Char(c) => {
-                // \r - return to line start
-                // \n - start a new line
-                print!("input: {c}\r\n");
-                Ok(c)
-            }
-            _ => Ok('e'),
-        },
-        Event::Mouse(_) => {
-            print!("mouse event\r\n");
-            Ok('m')
-        }
-        Event::Resize(x, y) => {
-            print!("new size: {x}, {y}\r\n");
-            Ok('r')
-        }
-    }
-}
-
 // TODO: read arrow keys
-fn read_char_non_blocking() -> Result<Option<char>> {
-    if event::poll(Duration::from_millis(GAME_STEP_LENGTH))? {
+fn process_input(head_direction: &mut Direction) -> Result<()> {
+    if event::poll(GAME_STEP_LENGTH)? {
         match event::read()? {
             Event::Key(KeyEvent { code: key, .. }) => match key {
                 KeyCode::Char(c) => {
                     // \r - return to line start
                     // \n - start a new line
-                    print!("input: {c}\r\n");
-                    Ok(Some(c))
+                    print!("\n\rinput: {c}\n\r");
+                    match c {
+                        'q' => process::exit(0),
+                        // TODO: process user controls
+                        'w' if *head_direction != Direction::Down => {
+                            *head_direction = Direction::Up
+                        }
+                        'a' if *head_direction != Direction::Right => {
+                            *head_direction = Direction::Left
+                        }
+                        's' if *head_direction != Direction::Up => {
+                            *head_direction = Direction::Down
+                        }
+                        'd' if *head_direction != Direction::Left => {
+                            *head_direction = Direction::Right
+                        }
+                        _ => {
+                            print!("\n\rIgnored user input.\n\r");
+                            std::thread::sleep(Duration::from_secs(1));
+                        }
+                    }
                 }
-                _ => Ok(Some('e')),
+                KeyCode::Up if *head_direction != Direction::Down => {
+                    *head_direction = Direction::Up
+                }
+                KeyCode::Left if *head_direction != Direction::Right => {
+                    *head_direction = Direction::Left
+                }
+                KeyCode::Down if *head_direction != Direction::Up => {
+                    *head_direction = Direction::Down
+                }
+                KeyCode::Right if *head_direction != Direction::Left => {
+                    *head_direction = Direction::Right
+                }
+                _ => {
+                    print!("\n\rIgnored user input.\n\r");
+                    std::thread::sleep(Duration::from_secs(1));
+                }
             },
-            Event::Mouse(_) => {
-                print!("mouse event\r\n");
-                Ok(Some('m'))
-            }
             Event::Resize(x, y) => {
-                print!("new size: {x}, {y}\r\n");
-                Ok(Some('r'))
+                print!("new terminal size: {x}, {y}\n\r");
             }
+            Event::Mouse(_) => unreachable!("disabled in crossterm by default"),
         }
-    } else {
-        Ok(None)
     }
+
+    Ok(())
 }
 
 // adds one food particle at random location
@@ -479,7 +488,7 @@ fn count_food(board: &Board) -> u32 {
     })
 }
 
-fn draw(board: &Board, out: &mut impl IOWrite) -> Result<()> {
+fn draw(board: &Board, out: &mut impl IOWrite, additional_text: &str) -> Result<()> {
     out.queue(terminal::Clear(ClearType::All))?;
     out.queue(cursor::MoveTo(0, 0))?;
 
@@ -487,12 +496,13 @@ fn draw(board: &Board, out: &mut impl IOWrite) -> Result<()> {
     let width = board[0].len();
 
     // top line of the board
-    let top = "-".repeat(width + 2);
-    out.queue(Print(format!("{top}\r\n")))?;
+    let top = "╔".to_owned() + &"═".repeat(width) + "╗";
+    let bottom = "╚".to_owned() + &"═".repeat(width) + "╝";
+    out.queue(Print(format!("{top}\n\r")))?;
 
     for row in board {
         out.queue(Print(format!(
-            "|{}|\r\n",
+            "║{}║\n\r",
             row.iter()
                 .fold(String::with_capacity(width), |mut line, tile| {
                     write!(&mut line, "{}", get_char(tile)).unwrap();
@@ -503,7 +513,10 @@ fn draw(board: &Board, out: &mut impl IOWrite) -> Result<()> {
 
     // bottom line
     out.queue(Print(format!(
-        "{top}\r\nPress q to exit...\r\nControl snake with W,A,S,D."
+        "{bottom}\n\r\
+         Control the snake with W,A,S,D or arrow keys\n\r\
+         {additional_text}\n\r\
+         Press q to exit..."
     )))?;
     out.flush()?;
 
@@ -520,18 +533,18 @@ fn get_char(tile: &Tile) -> char {
             SnakePart::Head(_) => 'H',
             SnakePart::Tail(_) => 'T',
             SnakePart::Body(direction) => match direction {
-                BodyPartDirection::Up => '@',
-                BodyPartDirection::Down => '@',
-                BodyPartDirection::Left => '@',
-                BodyPartDirection::Right => '@',
-                BodyPartDirection::TopLeftCornerRight => '@',
-                BodyPartDirection::TopLeftCornerDown => '@',
-                BodyPartDirection::TopRightCornerLeft => '@',
-                BodyPartDirection::TopRightCornerDown => '@',
-                BodyPartDirection::BottomLeftCornerRight => '@',
-                BodyPartDirection::BottomLeftCornerUp => '@',
-                BodyPartDirection::BottomRightCornerLeft => '@',
-                BodyPartDirection::BottomRightCornerUp => '@',
+                BodyPartDirection::Up => '┃',
+                BodyPartDirection::Down => '┃',
+                BodyPartDirection::Left => '━',
+                BodyPartDirection::Right => '━',
+                BodyPartDirection::TopLeftCornerRight => '┏',
+                BodyPartDirection::TopLeftCornerDown => '┏',
+                BodyPartDirection::TopRightCornerLeft => '┓',
+                BodyPartDirection::TopRightCornerDown => '┓',
+                BodyPartDirection::BottomLeftCornerRight => '┗',
+                BodyPartDirection::BottomLeftCornerUp => '┗',
+                BodyPartDirection::BottomRightCornerLeft => '┛',
+                BodyPartDirection::BottomRightCornerUp => '┛',
             },
             // BodyPartDirection::Horizontal => '━',
             // BodyPartDirection::Vertical => '┃',
