@@ -22,12 +22,18 @@ enum Direction {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum BodyPartDirection {
-    Vertical,
-    Horizontal,
-    TopLeftCorner,
-    TopRightCorner,
-    BottomLeftCorner,
-    BottomRightCorner,
+    Up,
+    Down,
+    Left,
+    Right,
+    TopLeftCornerRight,
+    TopLeftCornerDown,
+    TopRightCornerLeft,
+    TopRightCornerDown,
+    BottomLeftCornerRight,
+    BottomLeftCornerUp,
+    BottomRightCornerLeft,
+    BottomRightCornerUp,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -96,7 +102,7 @@ fn main() -> Result<()> {
         SnakeTile {
             x: 11,
             y: 10,
-            snake_tile_type: SnakePart::Body(BodyPartDirection::Horizontal),
+            snake_tile_type: SnakePart::Body(BodyPartDirection::Left),
         },
         SnakeTile {
             x: 12,
@@ -130,6 +136,8 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
         add_snake_to_board(&mut board, &snake);
         draw(&board, &mut out)?;
         remove_snake_from_board(&mut board, &snake);
+        move_snake(&mut snake, board[0].len(), board.len());
+        print!("{}\r\n", (-1) % 10);
         // to listen to button presses, use non-blocking IO with poll
         // it will also sleep the program for the right duration
         match read_char_non_blocking()? {
@@ -157,24 +165,55 @@ fn remove_snake_from_board(board: &mut Board, snake: &Snake) {
 }
 
 // snake wraps around board edges
-fn move_snake(snake: &mut Snake) {
+fn move_snake(snake: &mut Snake, width: usize, height: usize) {
     for tile in snake {
         let SnakeTile {
-            snake_tile_type: mut tile_type,
-            mut x,
-            mut y,
+            snake_tile_type,
+            x,
+            y,
         } = *tile;
-        match tile_type {
-            SnakePart::Head(direction) => match direction {
-                _ => todo!(),
+        let mut x = x as isize;
+        let mut y = y as isize;
+
+        match snake_tile_type {
+            SnakePart::Head(direction) | SnakePart::Tail(direction) => match direction {
+                Direction::Up => y -= 1,
+                Direction::Right => x += 1,
+                Direction::Down => y += 1,
+                Direction::Left => x -= 1,
             },
             SnakePart::Body(direction) => match direction {
-                _ => todo!(),
+                BodyPartDirection::Up
+                | BodyPartDirection::BottomLeftCornerUp
+                | BodyPartDirection::BottomRightCornerUp => y -= 1,
+                BodyPartDirection::Down
+                | BodyPartDirection::TopLeftCornerDown
+                | BodyPartDirection::TopRightCornerDown => y += 1,
+                BodyPartDirection::Left
+                | BodyPartDirection::TopRightCornerLeft
+                | BodyPartDirection::BottomRightCornerLeft => x -= 1,
+                BodyPartDirection::Right
+                | BodyPartDirection::TopLeftCornerRight
+                | BodyPartDirection::BottomLeftCornerRight => x += 1,
+                // BodyPartDirection::TopLeftCornerRight => todo!(),
+                // BodyPartDirection::TopLeftCornerDown => todo!(),
+                // BodyPartDirection::TopRightCornerLeft => todo!(),
+                // BodyPartDirection::TopRightCornerDown => todo!(),
+                // BodyPartDirection::BottomLeftCornerRight => todo!(),
+                // BodyPartDirection::BottomLeftCornerUp => todo!(),
+                // BodyPartDirection::BottomRightCornerLeft => todo!(),
+                // BodyPartDirection::BottomRightCornerUp => todo!(),
             },
-            SnakePart::Tail(direction) => match direction {
-                _ => todo!(),
-            },
+            /*SnakePart::Tail(direction) => match direction {
+                Direction::Up => todo!(),
+                Direction::Right => todo!(),
+                Direction::Down => todo!(),
+                Direction::Left => todo!(),
+            },*/
         }
+
+        tile.x = if x == -1 { width - 1 } else { x as usize };
+        tile.y = if y == -1 { height - 1 } else { y as usize };
     }
 }
 
@@ -288,7 +327,7 @@ fn draw(board: &Board, out: &mut impl IOWrite) -> Result<()> {
     }
 
     // bottom line
-    out.queue(Print(format!("{top}\r\nPress any key to exit...")))?;
+    out.queue(Print(format!("{top}\r\nPress q to exit...")))?;
     out.flush()?;
 
     Ok(())
@@ -304,12 +343,18 @@ fn get_char(tile: &Tile) -> char {
             SnakePart::Head(_) => 'H',
             SnakePart::Tail(_) => 'T',
             SnakePart::Body(direction) => match direction {
-                BodyPartDirection::Horizontal => '@',
-                BodyPartDirection::Vertical => '@',
-                BodyPartDirection::TopLeftCorner => '@',
-                BodyPartDirection::TopRightCorner => '@',
-                BodyPartDirection::BottomLeftCorner => '@',
-                BodyPartDirection::BottomRightCorner => '@',
+                BodyPartDirection::Up => '@',
+                BodyPartDirection::Down => '@',
+                BodyPartDirection::Left => '@',
+                BodyPartDirection::Right => '@',
+                BodyPartDirection::TopLeftCornerRight => '@',
+                BodyPartDirection::TopLeftCornerDown => '@',
+                BodyPartDirection::TopRightCornerLeft => '@',
+                BodyPartDirection::TopRightCornerDown => '@',
+                BodyPartDirection::BottomLeftCornerRight => '@',
+                BodyPartDirection::BottomLeftCornerUp => '@',
+                BodyPartDirection::BottomRightCornerLeft => '@',
+                BodyPartDirection::BottomRightCornerUp => '@',
             },
             // BodyPartDirection::Horizontal => '━',
             // BodyPartDirection::Vertical => '┃',
