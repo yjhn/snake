@@ -35,7 +35,7 @@ enum Tile {
     Empty,
     Food(FoodType), // variable is for the type of food
     Obstacle,
-    SnakePart(Snake),
+    SnakePart(SnakePart),
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -44,14 +44,17 @@ enum FoodType {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-enum Snake {
+enum SnakePart {
     Head(Direction), // bool = true => vertical
     Body(BodyPartDirection),
     Tail(Direction),
 }
 
-const BOARD_WIDTH: u16 = 50;
-const BOARD_HEIGHT: u16 = 20;
+const BOARD_WIDTH: usize = 50;
+const BOARD_HEIGHT: usize = 20;
+const STEP_LENGTH: usize = 500;
+type Board = Vec<Vec<Tile>>;
+type Snake = Vec<SnakeTile>;
 
 impl Direction {
     fn opposite_direction(&self) {
@@ -66,9 +69,9 @@ impl Direction {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 struct SnakeTile {
-    x: u16,
-    y: u16,
-    snake_tile_type: Snake,
+    x: usize,
+    y: usize,
+    snake_tile_type: SnakePart,
 }
 
 /* snake tiles need to
@@ -82,70 +85,61 @@ struct SnakeTile {
 
 fn main() -> Result<()> {
     let mut out = stdout();
-    // let reader = stdin();
-    // let mut rng = rand::thread_rng();
-    // let mut current_direction = Direction::Right;
-    let mut snake: Vec<SnakeTile> = Vec::with_capacity(16);
-    // snake starts at (0,0) with length 3, looking to the right
-    snake.push(SnakeTile {
-        x: 10,
-        y: 10,
-        snake_tile_type: Snake::Head(Direction::Left),
-    });
-    snake.push(SnakeTile {
-        x: 11,
-        y: 10,
-        snake_tile_type: Snake::Body(BodyPartDirection::Horizontal),
-    });
-    snake.push(SnakeTile {
-        x: 12,
-        y: 10,
-        snake_tile_type: Snake::Tail(Direction::Left),
-    });
+    let mut rng = rand::thread_rng();
+    let mut snake: Snake = vec![
+        SnakeTile {
+            x: 10,
+            y: 10,
+            snake_tile_type: SnakePart::Head(Direction::Left),
+        },
+        SnakeTile {
+            x: 11,
+            y: 10,
+            snake_tile_type: SnakePart::Body(BodyPartDirection::Horizontal),
+        },
+        SnakeTile {
+            x: 12,
+            y: 10,
+            snake_tile_type: SnakePart::Tail(Direction::Left),
+        },
+    ];
 
-    // strategy: either make a board of terminal dimensions or let a user specify it, or constant size
-
-    // for now - constant size
-    // one line of blocks around the board
-
-    // let the user specify whether the snake dies at side or is transported to another side
-    let mut board: Vec<Vec<Tile>> =
-        vec![vec![Tile::Empty; BOARD_WIDTH as usize]; BOARD_HEIGHT as usize];
-
-    // snake starts at (0,0) with length 3, looking to the right
-    // board[0][0] = Tile::SnakeTail(false);
-    // board[0][1] = Tile::SnakeBody(BodyPartDirection::Horizontal);
-    // board[0][2] = Tile::SnakeHead(false);
+    let mut board: Board = vec![vec![Tile::Empty; BOARD_WIDTH]; BOARD_HEIGHT];
 
     terminal::enable_raw_mode()?;
-    // let key_pressed = read_char()?;
-    // println!("aaaaaaaaaaa");
-    // queue!(stdout(), cursor::Hide)?;
     out.queue(terminal::EnterAlternateScreen)?;
     out.queue(cursor::MoveTo(0, 0))?;
-    out.queue(Print("printed\r\n"))?;
     out.flush()?;
-    draw(&board, &mut out);
-    // std::thread::sleep(Duration::new(2, 0));
 
+    game_loop(snake, board, rng)?;
     print!("Press any key to exit...\r\n");
-    let key_pressed = read_char()?;
+    let _ = read_char()?;
 
-    // std::thread::sleep(Duration::new(10, 0));
-    // queue!(stdout(), cursor::Show)?;
     terminal::disable_raw_mode()?;
     out.execute(terminal::LeaveAlternateScreen)
         .map(|_| Ok(()))?
 }
 
-fn read_char() -> Result<char> {
-    /*let Event::Key(KeyEvent {
-        code: KeyCode::Char(c),
-        ..
-    }) = event::read()?;
-    println!("Key pressed: {c}");
-    Ok(c)*/
+fn game_loop(mut snake: Snake, mut board: Board, mut rng: ThreadRng) -> Result<()> {
+    let mut out = stdout();
 
+    for _ in 0..5 {
+        add_food(&mut board, &mut rng);
+    }
+    add_snake_to_board(&mut board, &snake);
+    draw(&board, &mut out)?;
+    // std::thread::sleep(Duration::new(2, 0));
+
+    Ok(())
+}
+
+fn add_snake_to_board(board: &mut Board, snake: &Snake) {
+    for tile in snake {
+        board[tile.y][tile.x] = Tile::SnakePart(tile.snake_tile_type);
+    }
+}
+
+fn read_char() -> Result<char> {
     match event::read()? {
         Event::Key(KeyEvent { code: key, .. }) => match key {
             KeyCode::Char(c) => {
@@ -169,33 +163,34 @@ fn read_char() -> Result<char> {
 
 // adds one food particle at random location
 // food is only added to empty tile
-fn add_food(board: &mut Vec<Vec<Tile>>, rng: &mut ThreadRng) {
-    let height = board.len() as u16;
-    let width = board[0].len() as u16;
-    let (mut x, mut y): (u16, u16) = rng.gen();
+fn add_food(board: &mut Board, rng: &mut ThreadRng) {
+    let height = board.len();
+    let width = board[0].len();
+    let (a, b): (usize, usize) = rng.gen();
+    let (mut x, mut y) = (a % width, b % height);
 
     // make sure coordinates are on the board
     // x is width, y is height
     // (0, 0) is the top left corner
 
-    if board[y as usize][x as usize] == Tile::Empty {
-        board[y as usize][x as usize] = Tile::Food(FoodType::Blob);
+    if board[y][x] == Tile::Empty {
+        board[y][x] = Tile::Food(FoodType::Blob);
     } else {
         // this will loop endlessly if there are no free tiles
-        while board[y as usize][x as usize] != Tile::Empty {
-            x = rng.gen();
-            y = rng.gen();
+        while board[y][x] != Tile::Empty {
+            x = rng.gen::<usize>() % width;
+            y = rng.gen::<usize>() % height;
         }
 
-        board[y as usize][x as usize] = Tile::Food(FoodType::Blob);
+        board[y][x] = Tile::Food(FoodType::Blob);
     }
 }
 
-fn draw(board: &Vec<Vec<Tile>>, out: &mut impl IOWrite) -> Result<()> {
+fn draw(board: &Board, out: &mut impl IOWrite) -> Result<()> {
     // let height = board.len();
     let width = board[0].len();
 
-    // print the top line of the board
+    // top line of the board
     let top = "-".repeat(width + 2);
     out.queue(Print(format!("{top}\r\n")))?;
 
@@ -210,6 +205,7 @@ fn draw(board: &Vec<Vec<Tile>>, out: &mut impl IOWrite) -> Result<()> {
         )))?;
     }
 
+    // bottom line
     out.queue(Print(format!("{top}\r\n")))?;
     out.flush()?;
 
@@ -223,9 +219,9 @@ fn get_char(tile: &Tile) -> char {
         Tile::Food(_) => '*',
         Tile::Obstacle => '@',
         Tile::SnakePart(snake_part) => match snake_part {
-            Snake::Head(direction) => 'H',
-            Snake::Tail(direction) => 'T',
-            Snake::Body(direction) => match direction {
+            SnakePart::Head(direction) => 'H',
+            SnakePart::Tail(direction) => 'T',
+            SnakePart::Body(direction) => match direction {
                 BodyPartDirection::Horizontal => '@',
                 BodyPartDirection::Vertical => '@',
                 BodyPartDirection::TopLeftCorner => '@',
