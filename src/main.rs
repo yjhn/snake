@@ -6,15 +6,12 @@ use crossterm::{
     ExecutableCommand, QueueableCommand, Result,
 };
 use rand::prelude::*;
+use std::time::SystemTime;
 use std::{
     fmt::Write,
     io::{stdout, Write as IOWrite},
     process,
     time::Duration,
-};
-use std::{
-    ops::{Add, AddAssign},
-    time::SystemTime,
 };
 
 const BOARD_WIDTH: usize = 50;
@@ -52,7 +49,7 @@ enum Tile {
     Empty,
     Food(FoodType), // variable is for the type of food
     //Obstacle,
-    SnakePart(SnakePart),
+    SnakePart(SnakePart, bool),
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -198,7 +195,7 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
 
 fn add_snake_to_board(board: &mut Board, snake: &Snake) {
     for tile in snake {
-        board[tile.y][tile.x] = Tile::SnakePart(tile.snake_tile_type);
+        board[tile.y][tile.x] = Tile::SnakePart(tile.snake_tile_type, tile.eating);
     }
 }
 
@@ -621,32 +618,152 @@ fn get_char(tile: &Tile) -> char {
         Tile::Empty => ' ',
         Tile::Food(_) => '*',
         // Tile::Obstacle => '@',
-        Tile::SnakePart(snake_part) => match snake_part {
+        Tile::SnakePart(snake_part, eating) => match snake_part {
             SnakePart::Head(direction) => match direction {
-                Direction::Right => '>',
-                Direction::Left => '<',
-                Direction::Up => '⌃',
-                Direction::Down => '⌄',
+                Direction::Right => {
+                    if eating {
+                        'e'
+                    } else {
+                        '>'
+                    }
+                }
+                Direction::Left => {
+                    if eating {
+                        'e'
+                    } else {
+                        '<'
+                    }
+                }
+                Direction::Up => {
+                    if eating {
+                        'e'
+                    } else {
+                        '⌃'
+                    }
+                }
+                Direction::Down => {
+                    if eating {
+                        'e'
+                    } else {
+                        '⌄'
+                    }
+                }
             },
             SnakePart::Tail(direction) => match direction {
-                Direction::Right => '>',
-                Direction::Left => '<',
-                Direction::Up => '⌃',
-                Direction::Down => '⌄',
+                Direction::Right => {
+                    if eating {
+                        'e'
+                    } else {
+                        '>'
+                    }
+                }
+                Direction::Left => {
+                    if eating {
+                        'e'
+                    } else {
+                        '<'
+                    }
+                }
+                Direction::Up => {
+                    if eating {
+                        'e'
+                    } else {
+                        '⌃'
+                    }
+                }
+                Direction::Down => {
+                    if eating {
+                        'e'
+                    } else {
+                        '⌄'
+                    }
+                }
             },
             SnakePart::Body(direction) => match direction {
-                BodyPartDirection::Up => '┃',
-                BodyPartDirection::Down => '┃',
-                BodyPartDirection::Left => '━',
-                BodyPartDirection::Right => '━',
-                BodyPartDirection::TopLeftCornerRight => '┏',
-                BodyPartDirection::TopLeftCornerDown => '┏',
-                BodyPartDirection::TopRightCornerLeft => '┓',
-                BodyPartDirection::TopRightCornerDown => '┓',
-                BodyPartDirection::BottomLeftCornerRight => '┗',
-                BodyPartDirection::BottomLeftCornerUp => '┗',
-                BodyPartDirection::BottomRightCornerLeft => '┛',
-                BodyPartDirection::BottomRightCornerUp => '┛',
+                BodyPartDirection::Up => {
+                    if eating {
+                        'e'
+                    } else {
+                        '┃'
+                    }
+                }
+                BodyPartDirection::Down => {
+                    if eating {
+                        'e'
+                    } else {
+                        '┃'
+                    }
+                }
+                BodyPartDirection::Left => {
+                    if eating {
+                        'e'
+                    } else {
+                        '━'
+                    }
+                }
+                BodyPartDirection::Right => {
+                    if eating {
+                        'e'
+                    } else {
+                        '━'
+                    }
+                }
+                BodyPartDirection::TopLeftCornerRight => {
+                    if eating {
+                        'e'
+                    } else {
+                        '┏'
+                    }
+                }
+                BodyPartDirection::TopLeftCornerDown => {
+                    if eating {
+                        'e'
+                    } else {
+                        '┏'
+                    }
+                }
+                BodyPartDirection::TopRightCornerLeft => {
+                    if eating {
+                        'e'
+                    } else {
+                        '┓'
+                    }
+                }
+                BodyPartDirection::TopRightCornerDown => {
+                    if eating {
+                        'e'
+                    } else {
+                        '┓'
+                    }
+                }
+                BodyPartDirection::BottomLeftCornerRight => {
+                    if eating {
+                        'e'
+                    } else {
+                        '┗'
+                    }
+                }
+                BodyPartDirection::BottomLeftCornerUp => {
+                    if eating {
+                        'e'
+                    } else {
+                        '┗'
+                    }
+                }
+                BodyPartDirection::BottomRightCornerLeft => {
+                    if eating {
+                        'e'
+                    } else {
+                        '┛'
+                    }
+                }
+                BodyPartDirection::BottomRightCornerUp => {
+                    if eating {
+                        'e'
+                    } else {
+                        '┛'
+                    }
+                }
             },
         },
     }
