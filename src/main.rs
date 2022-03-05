@@ -8,7 +8,7 @@ use crossterm::{
 use rand::prelude::*;
 use std::{
     fmt::Write,
-    io::{stdout, Error, Write as IOWrite},
+    io::{stdout, Write as IOWrite},
     time::Duration,
 };
 
@@ -51,7 +51,7 @@ enum FoodType {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum SnakePart {
-    Head(Direction), // bool = true => vertical
+    Head(Direction),
     Body(BodyPartDirection),
     Tail(Direction),
 }
@@ -102,11 +102,26 @@ fn main() -> Result<()> {
         SnakeTile {
             x: 11,
             y: 10,
-            snake_tile_type: SnakePart::Body(BodyPartDirection::Left),
+            snake_tile_type: SnakePart::Body(BodyPartDirection::TopRightCornerLeft),
+        },
+        SnakeTile {
+            x: 11,
+            y: 11,
+            snake_tile_type: SnakePart::Body(BodyPartDirection::Up),
+        },
+        SnakeTile {
+            x: 11,
+            y: 12,
+            snake_tile_type: SnakePart::Body(BodyPartDirection::Up),
+        },
+        SnakeTile {
+            x: 11,
+            y: 13,
+            snake_tile_type: SnakePart::Body(BodyPartDirection::BottomLeftCornerUp),
         },
         SnakeTile {
             x: 12,
-            y: 10,
+            y: 13,
             snake_tile_type: SnakePart::Tail(Direction::Left),
         },
     ];
@@ -136,15 +151,25 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
         add_snake_to_board(&mut board, &snake);
         draw(&board, &mut out)?;
         remove_snake_from_board(&mut board, &snake);
-        move_snake(&mut snake, board[0].len(), board.len());
-        print!("{}\r\n", (-1) % 10);
+        snake = move_snake(snake, board[0].len(), board.len());
+        let head_direction: &mut Direction;
+        match snake[0].snake_tile_type {
+            SnakePart::Head(ref mut direction) => head_direction = direction,
+            _ => unreachable!(),
+        }
         // to listen to button presses, use non-blocking IO with poll
         // it will also sleep the program for the right duration
         match read_char_non_blocking()? {
             Some(c) => match c {
                 'q' => return Ok(()),
+                // TODO: process user controls
+                'w' if *head_direction != Direction::Down => *head_direction = Direction::Up,
+                'a' if *head_direction != Direction::Right => *head_direction = Direction::Left,
+                's' if *head_direction != Direction::Up => *head_direction = Direction::Down,
+                'd' if *head_direction != Direction::Left => *head_direction = Direction::Right,
                 _ => {
-                    std::thread::sleep(Duration::from_secs(2));
+                    print!("\r\nUnknown input.\r\n");
+                    std::thread::sleep(Duration::from_secs(1));
                 }
             },
             None => (),
@@ -164,56 +189,205 @@ fn remove_snake_from_board(board: &mut Board, snake: &Snake) {
     }
 }
 
+// player controls already applied to the head
 // snake wraps around board edges
-fn move_snake(snake: &mut Snake, width: usize, height: usize) {
-    for tile in snake {
+fn move_snake(snake: Snake, width: usize, height: usize) -> Snake {
+    let mut res = Vec::<SnakeTile>::with_capacity(snake.len());
+
+    // process snake head
+    let head = snake[0];
+    let SnakeTile {
+        snake_tile_type,
+        x,
+        y,
+    } = head;
+    let mut x = x as isize;
+    let mut y = y as isize;
+    match snake_tile_type {
+        SnakePart::Head(direction) => match direction {
+            Direction::Up => y -= 1,
+            Direction::Right => x += 1,
+            Direction::Down => y += 1,
+            Direction::Left => x -= 1,
+        },
+        _ => unreachable!(),
+    };
+    res.push(make_snake_tile(snake_tile_type, x, y, width, height));
+
+    for i in 1..snake.len() {
+        let previous_tile_type = snake[i - 1].snake_tile_type;
+        let tile = snake[i];
         let SnakeTile {
-            snake_tile_type,
+            mut snake_tile_type,
             x,
             y,
-        } = *tile;
+        } = tile;
         let mut x = x as isize;
         let mut y = y as isize;
 
         match snake_tile_type {
-            SnakePart::Head(direction) | SnakePart::Tail(direction) => match direction {
-                Direction::Up => y -= 1,
-                Direction::Right => x += 1,
-                Direction::Down => y += 1,
-                Direction::Left => x -= 1,
-            },
-            SnakePart::Body(direction) => match direction {
+            SnakePart::Body(ref mut direction) => match direction {
                 BodyPartDirection::Up
                 | BodyPartDirection::BottomLeftCornerUp
-                | BodyPartDirection::BottomRightCornerUp => y -= 1,
+                | BodyPartDirection::BottomRightCornerUp => {
+                    y -= 1;
+                    match previous_tile_type {
+                        SnakePart::Head(dir) => match dir {
+                            Direction::Up => *direction = BodyPartDirection::Up,
+                            Direction::Right => *direction = BodyPartDirection::TopLeftCornerRight,
+                            Direction::Left => *direction = BodyPartDirection::TopRightCornerLeft,
+                            Direction::Down => unreachable!(),
+                        },
+                        SnakePart::Body(dir) => *direction = dir,
+                        SnakePart::Tail(_) => unreachable!(),
+                    }
+                }
                 BodyPartDirection::Down
                 | BodyPartDirection::TopLeftCornerDown
-                | BodyPartDirection::TopRightCornerDown => y += 1,
+                | BodyPartDirection::TopRightCornerDown => {
+                    y += 1;
+                    match previous_tile_type {
+                        SnakePart::Head(dir) => match dir {
+                            Direction::Down => *direction = BodyPartDirection::Down,
+                            Direction::Right => {
+                                *direction = BodyPartDirection::BottomLeftCornerRight
+                            }
+                            Direction::Left => {
+                                *direction = BodyPartDirection::BottomRightCornerLeft
+                            }
+                            Direction::Up => unreachable!(),
+                        },
+                        SnakePart::Body(dir) => *direction = dir,
+                        SnakePart::Tail(_) => unreachable!(),
+                    }
+                }
                 BodyPartDirection::Left
                 | BodyPartDirection::TopRightCornerLeft
-                | BodyPartDirection::BottomRightCornerLeft => x -= 1,
+                | BodyPartDirection::BottomRightCornerLeft => {
+                    x -= 1;
+                    match previous_tile_type {
+                        SnakePart::Head(dir) => match dir {
+                            Direction::Up => *direction = BodyPartDirection::BottomLeftCornerUp,
+                            Direction::Down => *direction = BodyPartDirection::TopLeftCornerDown,
+                            Direction::Left => *direction = BodyPartDirection::Left,
+                            Direction::Right => unreachable!(),
+                        },
+                        SnakePart::Body(dir) => *direction = dir,
+                        SnakePart::Tail(_) => unreachable!(),
+                    }
+                }
                 BodyPartDirection::Right
                 | BodyPartDirection::TopLeftCornerRight
-                | BodyPartDirection::BottomLeftCornerRight => x += 1,
-                // BodyPartDirection::TopLeftCornerRight => todo!(),
-                // BodyPartDirection::TopLeftCornerDown => todo!(),
-                // BodyPartDirection::TopRightCornerLeft => todo!(),
-                // BodyPartDirection::TopRightCornerDown => todo!(),
-                // BodyPartDirection::BottomLeftCornerRight => todo!(),
-                // BodyPartDirection::BottomLeftCornerUp => todo!(),
-                // BodyPartDirection::BottomRightCornerLeft => todo!(),
-                // BodyPartDirection::BottomRightCornerUp => todo!(),
+                | BodyPartDirection::BottomLeftCornerRight => {
+                    x += 1;
+                    match previous_tile_type {
+                        SnakePart::Head(dir) => match dir {
+                            Direction::Up => *direction = BodyPartDirection::BottomRightCornerUp,
+                            Direction::Down => *direction = BodyPartDirection::TopRightCornerDown,
+                            Direction::Right => *direction = BodyPartDirection::Right,
+                            Direction::Left => unreachable!(),
+                        },
+                        SnakePart::Body(dir) => *direction = dir,
+                        SnakePart::Tail(_) => unreachable!(),
+                    }
+                }
             },
-            /*SnakePart::Tail(direction) => match direction {
-                Direction::Up => todo!(),
-                Direction::Right => todo!(),
-                Direction::Down => todo!(),
-                Direction::Left => todo!(),
-            },*/
+            SnakePart::Tail(ref mut direction) => match direction {
+                Direction::Up => {
+                    y -= 1;
+                    match previous_tile_type {
+                        SnakePart::Body(dir) => match dir {
+                            BodyPartDirection::Up => (),
+                            BodyPartDirection::TopLeftCornerRight => *direction = Direction::Right,
+                            BodyPartDirection::TopRightCornerLeft => *direction = Direction::Left,
+                            _ => unreachable!(),
+                        },
+                        _ => unreachable!(),
+                    }
+                }
+                Direction::Right => {
+                    x += 1;
+                    match previous_tile_type {
+                        SnakePart::Body(dir) => match dir {
+                            BodyPartDirection::Right => (),
+                            BodyPartDirection::BottomRightCornerUp => *direction = Direction::Up,
+                            BodyPartDirection::TopRightCornerDown => *direction = Direction::Down,
+                            _ => unreachable!(),
+                        },
+                        _ => unreachable!(),
+                    }
+                }
+                Direction::Down => {
+                    y += 1;
+                    match previous_tile_type {
+                        SnakePart::Body(dir) => match dir {
+                            BodyPartDirection::Down => (),
+                            BodyPartDirection::BottomLeftCornerRight => {
+                                *direction = Direction::Right
+                            }
+                            BodyPartDirection::BottomRightCornerLeft => {
+                                *direction = Direction::Left
+                            }
+                            _ => unreachable!(),
+                        },
+                        _ => unreachable!(),
+                    }
+                }
+                Direction::Left => {
+                    x -= 1;
+                    match previous_tile_type {
+                        SnakePart::Body(dir) => match dir {
+                            BodyPartDirection::Left => (),
+                            BodyPartDirection::BottomLeftCornerUp => *direction = Direction::Up,
+                            BodyPartDirection::TopLeftCornerDown => *direction = Direction::Down,
+                            _ => unreachable!(),
+                        },
+                        _ => unreachable!(),
+                    }
+                }
+            },
+            SnakePart::Head(_) => unreachable!(),
         }
 
-        tile.x = if x == -1 { width - 1 } else { x as usize };
-        tile.y = if y == -1 { height - 1 } else { y as usize };
+        res.push(make_snake_tile(snake_tile_type, x, y, width, height));
+    }
+
+    res
+}
+
+fn make_snake_tile(
+    snake_tile_type: SnakePart,
+    x: isize,
+    y: isize,
+    width: usize,
+    height: usize,
+) -> SnakeTile {
+    // wrap snake around edges
+    let x = if x == -1 {
+        width - 1
+    } else {
+        let x = x as usize;
+        if x == width + 1 {
+            0
+        } else {
+            x
+        }
+    };
+    let y = if y == -1 {
+        height - 1
+    } else {
+        let y = y as usize;
+        if y == height + 1 {
+            0
+        } else {
+            y
+        }
+    };
+
+    SnakeTile {
+        snake_tile_type,
+        x,
+        y,
     }
 }
 
@@ -239,6 +413,7 @@ fn read_char_blocking() -> Result<char> {
     }
 }
 
+// TODO: read arrow keys
 fn read_char_non_blocking() -> Result<Option<char>> {
     if event::poll(Duration::from_millis(GAME_STEP_LENGTH))? {
         match event::read()? {
@@ -327,7 +502,9 @@ fn draw(board: &Board, out: &mut impl IOWrite) -> Result<()> {
     }
 
     // bottom line
-    out.queue(Print(format!("{top}\r\nPress q to exit...")))?;
+    out.queue(Print(format!(
+        "{top}\r\nPress q to exit...\r\nControl snake with W,A,S,D."
+    )))?;
     out.flush()?;
 
     Ok(())
