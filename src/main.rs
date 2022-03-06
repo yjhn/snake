@@ -3,7 +3,7 @@ use crossterm::{
     event::{self, Event, KeyCode, KeyEvent},
     style::Print,
     terminal::{self, ClearType},
-    ExecutableCommand, QueueableCommand, Result,
+    QueueableCommand, Result,
 };
 use rand::prelude::*;
 use std::{
@@ -163,23 +163,24 @@ fn main() -> Result<()> {
 
     let board: Board = vec![vec![Tile::Empty; width]; height];
 
-    out.queue(cursor::Hide)?;
-    out.queue(terminal::EnterAlternateScreen)?;
+    out.queue(cursor::Hide)?
+        .queue(terminal::EnterAlternateScreen)?
+        .queue(cursor::MoveTo(0, 0))?
+        .flush()?;
     terminal::enable_raw_mode()?;
-    out.queue(cursor::MoveTo(0, 0))?;
-    out.flush()?;
 
-    game_loop(snake, board)?;
+    game_loop(snake, board, &mut out)?;
 
     terminal::disable_raw_mode()?;
-    out.queue(cursor::Show)?;
-    out.execute(terminal::LeaveAlternateScreen)?;
+    out.queue(cursor::Show)?
+        .queue(terminal::LeaveAlternateScreen)?
+        .flush()?;
 
     Ok(())
 }
 
-fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
-    let mut out = stdout();
+fn game_loop(mut snake: Snake, mut board: Board, out: &mut impl IOWrite) -> Result<()> {
+    // let mut out = stdout();
     let mut rng = rand::thread_rng();
     let mut timer;
     let mut step_time = Duration::ZERO;
@@ -196,7 +197,7 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
         add_snake_to_board(&mut board, &snake);
         draw(
             &board,
-            &mut out,
+            out,
             &format!(
                 "step time: {} us\n\r\
             snake length: {}\n\r\
@@ -585,16 +586,15 @@ fn count_food(board: &Board) -> u32 {
 }
 
 fn draw(board: &Board, out: &mut impl IOWrite, additional_text: &str) -> Result<()> {
-    out.queue(terminal::Clear(ClearType::All))?;
-    out.queue(cursor::MoveTo(0, 0))?;
-
     // let height = board.len();
     let width = board[0].len();
 
     // top line of the board
     let top = "╔".to_owned() + &"═".repeat(width) + "╗";
     let bottom = "╚".to_owned() + &"═".repeat(width) + "╝";
-    out.queue(Print(format!("{top}\n\r")))?;
+    out.queue(terminal::Clear(ClearType::All))?
+        .queue(cursor::MoveTo(0, 0))?
+        .queue(Print(format!("{top}\n\r")))?;
 
     for row in board {
         out.queue(Print(format!(
@@ -613,8 +613,8 @@ fn draw(board: &Board, out: &mut impl IOWrite, additional_text: &str) -> Result<
          Control the snake with W,A,S,D or arrow keys\n\r\
          {additional_text}\n\r\
          Press q to exit..."
-    )))?;
-    out.flush()?;
+    )))?
+    .flush()?;
 
     Ok(())
 }
