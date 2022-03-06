@@ -10,7 +10,6 @@ use std::{
     fmt::Write,
     io::{stdout, Write as IOWrite},
     ops::SubAssign,
-    process,
     time::Duration,
 };
 use std::{ops::AddAssign, time::SystemTime};
@@ -216,7 +215,59 @@ fn game_loop(mut snake: Snake, mut board: Board) -> Result<()> {
         // it will also sleep the program for the right duration
         std::thread::sleep(GAME_STEP_LENGTH);
 
-        process_input(head_direction)?;
+        if event::poll(Duration::ZERO /*from_millis(10)*/)? {
+            match event::read()? {
+                Event::Key(KeyEvent { code: key, .. }) => match key {
+                    KeyCode::Char(c) => {
+                        // \r - return to line start
+                        // \n - start a new line
+                        print!("\n\rinput: {c}\n\r");
+                        match c {
+                            'q' => return Ok(()),
+                            // TODO: process user controls
+                            'w' if *head_direction != Direction::Down => {
+                                *head_direction = Direction::Up
+                            }
+                            'a' if *head_direction != Direction::Right => {
+                                *head_direction = Direction::Left
+                            }
+                            's' if *head_direction != Direction::Up => {
+                                *head_direction = Direction::Down
+                            }
+                            'd' if *head_direction != Direction::Left => {
+                                *head_direction = Direction::Right
+                            }
+                            _ => {
+                                print!("\n\rIgnored user input.\n\r");
+                                std::thread::sleep(Duration::from_secs(1));
+                            }
+                        }
+                    }
+                    KeyCode::Up if *head_direction != Direction::Down => {
+                        *head_direction = Direction::Up
+                    }
+                    KeyCode::Left if *head_direction != Direction::Right => {
+                        *head_direction = Direction::Left
+                    }
+                    KeyCode::Down if *head_direction != Direction::Up => {
+                        *head_direction = Direction::Down
+                    }
+                    KeyCode::Right if *head_direction != Direction::Left => {
+                        *head_direction = Direction::Right
+                    }
+                    _ => {
+                        print!("\n\rIgnored user input.\n\r");
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
+                },
+                Event::Resize(x, y) => {
+                    print!("new terminal size: {x}, {y}\n\r");
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                Event::Mouse(_) => unreachable!("disabled in crossterm by default"),
+            }
+        }
+
         snake = move_snake(&board, snake);
     }
 }
@@ -493,63 +544,6 @@ fn wrap_y(y: isize, height: usize) -> usize {
         }
     }
 }*/
-
-fn process_input(head_direction: &mut Direction) -> Result<()> {
-    if event::poll(Duration::ZERO /*from_millis(10)*/)? {
-        match event::read()? {
-            Event::Key(KeyEvent { code: key, .. }) => match key {
-                KeyCode::Char(c) => {
-                    // \r - return to line start
-                    // \n - start a new line
-                    print!("\n\rinput: {c}\n\r");
-                    match c {
-                        'q' => process::exit(0),
-                        // TODO: process user controls
-                        'w' if *head_direction != Direction::Down => {
-                            *head_direction = Direction::Up
-                        }
-                        'a' if *head_direction != Direction::Right => {
-                            *head_direction = Direction::Left
-                        }
-                        's' if *head_direction != Direction::Up => {
-                            *head_direction = Direction::Down
-                        }
-                        'd' if *head_direction != Direction::Left => {
-                            *head_direction = Direction::Right
-                        }
-                        _ => {
-                            print!("\n\rIgnored user input.\n\r");
-                            std::thread::sleep(Duration::from_secs(1));
-                        }
-                    }
-                }
-                KeyCode::Up if *head_direction != Direction::Down => {
-                    *head_direction = Direction::Up
-                }
-                KeyCode::Left if *head_direction != Direction::Right => {
-                    *head_direction = Direction::Left
-                }
-                KeyCode::Down if *head_direction != Direction::Up => {
-                    *head_direction = Direction::Down
-                }
-                KeyCode::Right if *head_direction != Direction::Left => {
-                    *head_direction = Direction::Right
-                }
-                _ => {
-                    print!("\n\rIgnored user input.\n\r");
-                    std::thread::sleep(Duration::from_secs(1));
-                }
-            },
-            Event::Resize(x, y) => {
-                print!("new terminal size: {x}, {y}\n\r");
-                std::thread::sleep(Duration::from_secs(1));
-            }
-            Event::Mouse(_) => unreachable!("disabled in crossterm by default"),
-        }
-    }
-
-    Ok(())
-}
 
 // adds one food particle at random location
 // food is only added to empty tile
