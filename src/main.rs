@@ -8,7 +8,7 @@ use crossterm::{
 use rand::prelude::*;
 use std::{
     fmt::Write,
-    io::{stdout, Write as IOWrite},
+    io::{stdout, Stdout, Write as IOWrite},
     ops::SubAssign,
     time::Duration,
 };
@@ -65,7 +65,7 @@ enum SnakePart {
 }
 
 type Board = Vec<Vec<Tile>>;
-type Snake = Vec<SnakeTile>;
+type SnakeType = Vec<SnakeTile>;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 struct SnakeTile {
@@ -122,7 +122,7 @@ fn main() -> Result<()> {
     let width = BOARD_WIDTH;
     let height = BOARD_HEIGHT;
 
-    let snake: Snake = vec![
+    let mut snake: SnakeType = vec![
         SnakeTile {
             x: Wrap::new(10, width),
             y: Wrap::new(10, height),
@@ -160,6 +160,7 @@ fn main() -> Result<()> {
             eating: false,
         },
     ];
+    snake[0].x.modulus = 30000;
 
     let board: Board = vec![vec![Tile::Empty; width]; height];
 
@@ -179,7 +180,470 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn game_loop(mut snake: Snake, mut board: Board, out: &mut impl IOWrite) -> Result<()> {
+// TODO: move game structs and logic to module to make internals private
+struct Snake {
+    head: SnakeTile,
+    body: Vec<SnakeTile>,
+    tail: SnakeTile,
+}
+
+impl Snake {
+    pub fn new(board_width: usize, board_height: usize) -> Self {
+        Snake {
+            head: SnakeTile {
+                x: Wrap::new(10, board_width),
+                y: Wrap::new(10, board_height),
+                snake_tile_type: SnakePart::Head(Direction::Left),
+                eating: false,
+            },
+            body: vec![
+                SnakeTile {
+                    x: Wrap::new(11, board_width),
+                    y: Wrap::new(10, board_height),
+                    snake_tile_type: SnakePart::Body(BodyPartDirection::TopRightCornerLeft),
+                    eating: false,
+                },
+                SnakeTile {
+                    x: Wrap::new(11, board_width),
+                    y: Wrap::new(11, board_height),
+                    snake_tile_type: SnakePart::Body(BodyPartDirection::Up),
+                    eating: false,
+                },
+                SnakeTile {
+                    x: Wrap::new(11, board_width),
+                    y: Wrap::new(12, board_height),
+                    snake_tile_type: SnakePart::Body(BodyPartDirection::Up),
+                    eating: false,
+                },
+                SnakeTile {
+                    x: Wrap::new(11, board_width),
+                    y: Wrap::new(13, board_height),
+                    snake_tile_type: SnakePart::Body(BodyPartDirection::BottomLeftCornerUp),
+                    eating: false,
+                },
+            ],
+            tail: SnakeTile {
+                x: Wrap::new(12, board_width),
+                y: Wrap::new(13, board_height),
+                snake_tile_type: SnakePart::Tail(Direction::Left),
+                eating: false,
+            },
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.body.len() + 2
+    }
+
+    pub fn head(&self) -> &SnakeTile {
+        &self.head
+    }
+
+    pub fn body(&self) -> &Vec<SnakeTile> {
+        &self.body
+    }
+
+    pub fn tail(&self) -> &SnakeTile {
+        &self.tail
+    }
+}
+
+struct SnakeGame {
+    out: Stdout,
+    board: Board,
+    snake: Snake,
+    score: u32,
+}
+
+impl SnakeGame {
+    pub fn new(board_width: usize, board_height: usize) -> Self {
+        SnakeGame {
+            out: stdout(),
+            board: vec![vec![Tile::Empty; board_width]; board_height],
+            snake: Snake::new(board_width, board_height),
+            score: 0,
+        }
+    }
+
+    pub fn set_up_screen(&mut self) -> Result<()> {
+        self.out
+            .queue(cursor::Hide)?
+            .queue(terminal::EnterAlternateScreen)?
+            .queue(cursor::MoveTo(0, 0))?
+            .flush()?;
+        terminal::enable_raw_mode()?;
+
+        Ok(())
+    }
+
+    pub fn tear_down_screen(&mut self) -> Result<()> {
+        terminal::disable_raw_mode()?;
+        self.out
+            .queue(cursor::Show)?
+            .queue(terminal::LeaveAlternateScreen)?
+            .flush()?;
+
+        Ok(())
+    }
+
+    pub fn play(&mut self) -> Result<()> {
+        // let mut out = stdout();
+        let mut rng = rand::thread_rng();
+        let mut timer;
+        let mut step_time = Duration::ZERO;
+
+        loop {
+            timer = SystemTime::now();
+            for _ in 0..5 {
+                add_food(&mut self.board, &mut rng);
+            }
+            if self.snake.head().eating {
+                self.score += 1;
+            }
+            self.add_snake_to_board();
+            draw(
+                &self.board,
+                &mut self.out,
+                &format!(
+                    "step time: {} us\n\r\
+            snake length: {}\n\r\
+            score: {}",
+                    step_time.as_micros(),
+                    self.snake.len(),
+                    self.score
+                ),
+            )?;
+            self.remove_snake_from_board();
+            let head_direction = match self.snake.head().snake_tile_type {
+                SnakePart::Head(ref mut direction) => direction,
+                _ => unreachable!(),
+            };
+            step_time = timer.elapsed().unwrap();
+            std::thread::sleep(GAME_STEP_LENGTH);
+
+            if event::poll(Duration::ZERO /*from_millis(10)*/)? {
+                match event::read()? {
+                    Event::Key(KeyEvent { code: key, .. }) => match key {
+                        KeyCode::Char(c) => {
+                            // \r - return to line start
+                            // \n - start a new line
+                            print!("\n\rinput: {c}\n\r");
+                            match c {
+                                'q' => break,
+                                'w' if *head_direction != Direction::Down => {
+                                    *head_direction = Direction::Up
+                                }
+                                'a' if *head_direction != Direction::Right => {
+                                    *head_direction = Direction::Left
+                                }
+                                's' if *head_direction != Direction::Up => {
+                                    *head_direction = Direction::Down
+                                }
+                                'd' if *head_direction != Direction::Left => {
+                                    *head_direction = Direction::Right
+                                }
+                                _ => {
+                                    print!("\n\rIgnored user input.\n\r");
+                                    std::thread::sleep(Duration::from_secs(1));
+                                }
+                            }
+                        }
+                        KeyCode::Up if *head_direction != Direction::Down => {
+                            *head_direction = Direction::Up
+                        }
+                        KeyCode::Left if *head_direction != Direction::Right => {
+                            *head_direction = Direction::Left
+                        }
+                        KeyCode::Down if *head_direction != Direction::Up => {
+                            *head_direction = Direction::Down
+                        }
+                        KeyCode::Right if *head_direction != Direction::Left => {
+                            *head_direction = Direction::Right
+                        }
+                        _ => {
+                            print!("\n\rIgnored user input.\n\r");
+                            std::thread::sleep(Duration::from_secs(1));
+                        }
+                    },
+                    Event::Resize(x, y) => {
+                        print!("new terminal size: {x}, {y}\n\r");
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
+                    Event::Mouse(_) => unreachable!("disabled in crossterm by default"),
+                }
+            }
+
+            self.snake = self.move_snake();
+        }
+
+        Ok(())
+    }
+
+    fn add_snake_to_board(&mut self) {
+        // head
+        let head = self.snake.head();
+        self.board[usize::from(head.y)][usize::from(head.x)] =
+            Tile::SnakePart(head.snake_tile_type, head.eating);
+        // tail
+        let tail = self.snake.tail();
+        self.board[usize::from(tail.y)][usize::from(tail.x)] =
+            Tile::SnakePart(tail.snake_tile_type, tail.eating);
+        // body
+        for tile in self.snake.body() {
+            self.board[usize::from(tile.y)][usize::from(tile.x)] =
+                Tile::SnakePart(tile.snake_tile_type, tile.eating);
+        }
+    }
+
+    fn remove_snake_from_board(&mut self) {
+        // head
+        let head = self.snake.head();
+        self.board[usize::from(head.y)][usize::from(head.x)] = Tile::Empty;
+        // tail
+        let tail = self.snake.tail();
+        self.board[usize::from(tail.y)][usize::from(tail.x)] = Tile::Empty;
+        // body
+        for tile in self.snake.body() {
+            self.board[usize::from(tile.y)][usize::from(tile.x)] = Tile::Empty;
+        }
+    }
+
+    // player controls already applied to the head
+    // snake wraps around board edges
+    // TODO: maybe move this to Snake impl?
+    // also if possible this should be simplified
+    fn move_snake(&mut self) -> Snake {
+        let mut res = Vec::<SnakeTile>::with_capacity(snake.len());
+
+        // process snake head
+        let head = snake[0];
+        let SnakeTile {
+            snake_tile_type,
+            mut x,
+            mut y,
+            eating: _eating,
+        } = head;
+        match snake_tile_type {
+            SnakePart::Head(direction) => match direction {
+                Direction::Up => y -= 1,
+                Direction::Right => x += 1,
+                Direction::Down => y += 1,
+                Direction::Left => x -= 1,
+            },
+            _ => unreachable!(),
+        };
+        let eating = if board[usize::from(y)][usize::from(x)] == Tile::Food(FoodType::Blob) {
+            true
+        } else {
+            false
+        };
+        res.push(SnakeTile {
+            x,
+            y,
+            snake_tile_type,
+            eating,
+        });
+        // TODO: adapt this
+        // maybe just shift forward the whole snake body and then deal with head and tail?
+        for i in 1..(snake.len() - 1) {
+            let previous_tile = snake[i - 1];
+            let previous_tile_type = previous_tile.snake_tile_type;
+            let previous_tile_eating = previous_tile.eating;
+            let tile = snake[i];
+            let SnakeTile {
+                mut snake_tile_type,
+                mut x,
+                mut y,
+                eating: _eating,
+            } = tile;
+
+            match snake_tile_type {
+                SnakePart::Body(ref mut direction) => match direction {
+                    BodyPartDirection::Up
+                    | BodyPartDirection::BottomLeftCornerUp
+                    | BodyPartDirection::BottomRightCornerUp => {
+                        y -= 1;
+                        match previous_tile_type {
+                            SnakePart::Head(dir) => match dir {
+                                Direction::Up => *direction = BodyPartDirection::Up,
+                                Direction::Right => {
+                                    *direction = BodyPartDirection::TopLeftCornerRight
+                                }
+                                Direction::Left => {
+                                    *direction = BodyPartDirection::TopRightCornerLeft
+                                }
+                                Direction::Down => unreachable!(),
+                            },
+                            SnakePart::Body(dir) => *direction = dir,
+                            SnakePart::Tail(_) => unreachable!(),
+                        }
+                    }
+                    BodyPartDirection::Down
+                    | BodyPartDirection::TopLeftCornerDown
+                    | BodyPartDirection::TopRightCornerDown => {
+                        y += 1;
+                        match previous_tile_type {
+                            SnakePart::Head(dir) => match dir {
+                                Direction::Down => *direction = BodyPartDirection::Down,
+                                Direction::Right => {
+                                    *direction = BodyPartDirection::BottomLeftCornerRight
+                                }
+                                Direction::Left => {
+                                    *direction = BodyPartDirection::BottomRightCornerLeft
+                                }
+                                Direction::Up => unreachable!(),
+                            },
+                            SnakePart::Body(dir) => *direction = dir,
+                            SnakePart::Tail(_) => unreachable!(),
+                        }
+                    }
+                    BodyPartDirection::Left
+                    | BodyPartDirection::TopRightCornerLeft
+                    | BodyPartDirection::BottomRightCornerLeft => {
+                        x -= 1;
+                        match previous_tile_type {
+                            SnakePart::Head(dir) => match dir {
+                                Direction::Up => *direction = BodyPartDirection::BottomLeftCornerUp,
+                                Direction::Down => {
+                                    *direction = BodyPartDirection::TopLeftCornerDown
+                                }
+                                Direction::Left => *direction = BodyPartDirection::Left,
+                                Direction::Right => unreachable!(),
+                            },
+                            SnakePart::Body(dir) => *direction = dir,
+                            SnakePart::Tail(_) => unreachable!(),
+                        }
+                    }
+                    BodyPartDirection::Right
+                    | BodyPartDirection::TopLeftCornerRight
+                    | BodyPartDirection::BottomLeftCornerRight => {
+                        x += 1;
+                        match previous_tile_type {
+                            SnakePart::Head(dir) => match dir {
+                                Direction::Up => {
+                                    *direction = BodyPartDirection::BottomRightCornerUp
+                                }
+                                Direction::Down => {
+                                    *direction = BodyPartDirection::TopRightCornerDown
+                                }
+                                Direction::Right => *direction = BodyPartDirection::Right,
+                                Direction::Left => unreachable!(),
+                            },
+                            SnakePart::Body(dir) => *direction = dir,
+                            SnakePart::Tail(_) => unreachable!(),
+                        }
+                    }
+                },
+                SnakePart::Tail(_) => unreachable!(),
+                SnakePart::Head(_) => unreachable!(),
+            }
+
+            res.push(SnakeTile {
+                x,
+                y,
+                snake_tile_type,
+                eating: previous_tile_eating,
+            });
+        }
+
+        let previous_tile = snake[snake.len() - 2];
+        let tile = snake[snake.len() - 1];
+        let SnakeTile {
+            mut snake_tile_type,
+            mut x,
+            mut y,
+            eating: _eating,
+        } = tile;
+        if snake[snake.len() - 1].eating {
+            res.push(previous_tile);
+            res.push(SnakeTile {
+                x,
+                y,
+                snake_tile_type,
+                eating: false,
+            });
+        } else {
+            match snake_tile_type {
+                SnakePart::Tail(ref mut direction) => match direction {
+                    Direction::Up => {
+                        y -= 1;
+                        match previous_tile.snake_tile_type {
+                            SnakePart::Body(dir) => match dir {
+                                BodyPartDirection::Up => (),
+                                BodyPartDirection::TopLeftCornerRight => {
+                                    *direction = Direction::Right
+                                }
+                                BodyPartDirection::TopRightCornerLeft => {
+                                    *direction = Direction::Left
+                                }
+                                _ => unreachable!(),
+                            },
+                            _ => unreachable!(),
+                        }
+                    }
+                    Direction::Right => {
+                        x += 1;
+                        match previous_tile.snake_tile_type {
+                            SnakePart::Body(dir) => match dir {
+                                BodyPartDirection::Right => (),
+                                BodyPartDirection::BottomRightCornerUp => {
+                                    *direction = Direction::Up
+                                }
+                                BodyPartDirection::TopRightCornerDown => {
+                                    *direction = Direction::Down
+                                }
+                                _ => unreachable!(),
+                            },
+                            _ => unreachable!(),
+                        }
+                    }
+                    Direction::Down => {
+                        y += 1;
+                        match previous_tile.snake_tile_type {
+                            SnakePart::Body(dir) => match dir {
+                                BodyPartDirection::Down => (),
+                                BodyPartDirection::BottomLeftCornerRight => {
+                                    *direction = Direction::Right
+                                }
+                                BodyPartDirection::BottomRightCornerLeft => {
+                                    *direction = Direction::Left
+                                }
+                                _ => unreachable!(),
+                            },
+                            _ => unreachable!(),
+                        }
+                    }
+                    Direction::Left => {
+                        x -= 1;
+                        match previous_tile.snake_tile_type {
+                            SnakePart::Body(dir) => match dir {
+                                BodyPartDirection::Left => (),
+                                BodyPartDirection::BottomLeftCornerUp => *direction = Direction::Up,
+                                BodyPartDirection::TopLeftCornerDown => {
+                                    *direction = Direction::Down
+                                }
+                                _ => unreachable!(),
+                            },
+                            _ => unreachable!(),
+                        }
+                    }
+                },
+                _ => unreachable!(),
+            }
+
+            res.push(SnakeTile {
+                x,
+                y,
+                snake_tile_type,
+                eating: previous_tile.eating,
+            });
+        }
+
+        res
+    }
+}
+
+fn game_loop(mut snake: SnakeType, mut board: Board, out: &mut impl IOWrite) -> Result<()> {
     // let mut out = stdout();
     let mut rng = rand::thread_rng();
     let mut timer;
@@ -212,8 +676,6 @@ fn game_loop(mut snake: Snake, mut board: Board, out: &mut impl IOWrite) -> Resu
             _ => unreachable!(),
         };
         step_time = timer.elapsed().unwrap();
-        // to listen to button presses, use non-blocking IO with poll
-        // it will also sleep the program for the right duration
         std::thread::sleep(GAME_STEP_LENGTH);
 
         if event::poll(Duration::ZERO /*from_millis(10)*/)? {
@@ -272,14 +734,14 @@ fn game_loop(mut snake: Snake, mut board: Board, out: &mut impl IOWrite) -> Resu
     }
 }
 
-fn add_snake_to_board(board: &mut Board, snake: &Snake) {
+fn add_snake_to_board(board: &mut Board, snake: &SnakeType) {
     for tile in snake {
         board[usize::from(tile.y)][usize::from(tile.x)] =
             Tile::SnakePart(tile.snake_tile_type, tile.eating);
     }
 }
 
-fn remove_snake_from_board(board: &mut Board, snake: &Snake) {
+fn remove_snake_from_board(board: &mut Board, snake: &SnakeType) {
     for tile in snake {
         board[usize::from(tile.y)][usize::from(tile.x)] = Tile::Empty;
     }
@@ -287,7 +749,7 @@ fn remove_snake_from_board(board: &mut Board, snake: &Snake) {
 
 // player controls already applied to the head
 // snake wraps around board edges
-fn move_snake(board: &Board, snake: Snake) -> Snake {
+fn move_snake(board: &Board, snake: SnakeType) -> SnakeType {
     let mut res = Vec::<SnakeTile>::with_capacity(snake.len());
 
     // process snake head
