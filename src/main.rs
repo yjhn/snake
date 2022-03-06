@@ -496,52 +496,6 @@ fn move_snake(board: &Board, snake: Snake) -> Snake {
     res
 }
 
-/*fn make_snake_tile(
-    snake_tile_type: SnakePart,
-    x: isize,
-    y: isize,
-    eating: bool,
-    width: usize,
-    height: usize,
-) -> SnakeTile {
-    // wrap snake around edges
-    let x = wrap_x(x, width);
-    let y = wrap_y(y, height);
-
-    SnakeTile {
-        snake_tile_type,
-        x,
-        y,
-        eating,
-    }
-}
-
-fn wrap_x(x: isize, width: usize) -> usize {
-    if x == -1 {
-        width - 1
-    } else {
-        let x = x as usize;
-        if x == width {
-            0
-        } else {
-            x
-        }
-    }
-}
-
-fn wrap_y(y: isize, height: usize) -> usize {
-    if y == -1 {
-        height - 1
-    } else {
-        let y = y as usize;
-        if y == height {
-            0
-        } else {
-            y
-        }
-    }
-}*/
-
 // adds one food particle at random location
 // food is only added to empty tile
 fn add_food(board: &mut Board, rng: &mut ThreadRng) {
