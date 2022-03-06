@@ -225,7 +225,6 @@ fn game_loop(mut snake: Snake, mut board: Board, out: &mut impl IOWrite) -> Resu
                         print!("\n\rinput: {c}\n\r");
                         match c {
                             'q' => return Ok(()),
-                            // TODO: process user controls
                             'w' if *head_direction != Direction::Down => {
                                 *head_direction = Direction::Up
                             }
@@ -288,7 +287,6 @@ fn remove_snake_from_board(board: &mut Board, snake: &Snake) {
 
 // player controls already applied to the head
 // snake wraps around board edges
-// TODO: handle eating
 fn move_snake(board: &Board, snake: Snake) -> Snake {
     let mut res = Vec::<SnakeTile>::with_capacity(snake.len());
 
@@ -421,8 +419,6 @@ fn move_snake(board: &Board, snake: Snake) -> Snake {
         eating: _eating,
     } = tile;
     if snake[snake.len() - 1].eating {
-        // TODO: lengthen the snake
-
         res.push(previous_tile);
         res.push(SnakeTile {
             x,
