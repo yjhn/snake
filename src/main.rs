@@ -47,7 +47,7 @@ enum BodyPartDirection {
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Tile {
     Empty,
-    Food(FoodType), // variable is for the type of food
+    Food(FoodType),
     //Obstacle,
     SnakePart(SnakePart, bool),
 }
@@ -240,7 +240,7 @@ struct SnakeGame<R: SeedableRng + Rng, W: IOWrite> {
 impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
     pub fn new(board_width: usize, board_height: usize, out: W) -> Self {
         SnakeGame {
-            out: out,
+            out,
             board: vec![vec![Tile::Empty; board_width]; board_height],
             board_width,
             board_height,
@@ -389,7 +389,6 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
 
     // player controls already applied to the head
     // snake wraps around board edges
-    // TODO: maybe move this to Snake impl?
     // also if possible this should be simplified
     fn move_snake(&mut self) -> Snake {
         let mut res = Snake::new(self.board_width, self.board_height);
@@ -410,7 +409,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
             },
             _ => unreachable!(),
         };
-        let eating = self.board[usize::from(y)][usize::from(x)] == Tile::Food(FoodType::Blob);
+        let eating = self.board[usize::from(y)][usize::from(x)].has_food();
         res.head = SnakeTile {
             x,
             y,
@@ -622,15 +621,14 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
             return;
         }
 
-        let height = self.board.len();
-        let width = self.board[0].len();
+        let height = self.board_height;
+        let width = self.board_width;
         let (a, b): (usize, usize) = self.rng.gen();
         let (mut x, mut y) = (a % width, b % height);
 
         if self.board[y][x] == Tile::Empty {
             self.board[y][x] = Tile::Food(FoodType::Blob);
         } else {
-            // this will loop endlessly if there are no free tiles
             while self.board[y][x] != Tile::Empty {
                 x = self.rng.gen::<usize>() % width;
                 y = self.rng.gen::<usize>() % height;
@@ -641,8 +639,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
     }
 
     fn draw(&mut self, additional_text: &str) -> Result<()> {
-        // let height = board.len();
-        let width = self.board[0].len();
+        let width = self.board_width;
 
         // top line of the board
         let top = "╔".to_owned() + &"═".repeat(width) + "╗";
