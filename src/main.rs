@@ -5,7 +5,7 @@ use crossterm::{
     terminal::{self, ClearType},
     QueueableCommand, Result,
 };
-use rand::prelude::*;
+use rand::{prelude::SmallRng, Rng, SeedableRng};
 use std::{
     fmt::Write,
     io::{stdout, Stdout, Write as IOWrite},
@@ -118,11 +118,15 @@ impl From<Wrap> for usize {
 }
 
 fn main() -> Result<()> {
-    let mut out = stdout();
     let width = BOARD_WIDTH;
     let height = BOARD_HEIGHT;
 
-    let mut snake: SnakeType = vec![
+    let mut game: SnakeGame<SmallRng, Stdout> = SnakeGame::new(width, height, stdout());
+    game.set_up_screen();
+    game.play();
+    game.tear_down_screen();
+
+    /*let mut snake: SnakeType = vec![
         SnakeTile {
             x: Wrap::new(10, width),
             y: Wrap::new(10, height),
@@ -160,23 +164,23 @@ fn main() -> Result<()> {
             eating: false,
         },
     ];
-    snake[0].x.modulus = 30000;
+    snake[0].x.modulus = 30000;*/
+    /*
+        let board: Board = vec![vec![Tile::Empty; width]; height];
 
-    let board: Board = vec![vec![Tile::Empty; width]; height];
+        out.queue(cursor::Hide)?
+            .queue(terminal::EnterAlternateScreen)?
+            .queue(cursor::MoveTo(0, 0))?
+            .flush()?;
+        terminal::enable_raw_mode()?;
 
-    out.queue(cursor::Hide)?
-        .queue(terminal::EnterAlternateScreen)?
-        .queue(cursor::MoveTo(0, 0))?
-        .flush()?;
-    terminal::enable_raw_mode()?;
+        game_loop(snake, board, &mut out)?;
 
-    game_loop(snake, board, &mut out)?;
-
-    terminal::disable_raw_mode()?;
-    out.queue(cursor::Show)?
-        .queue(terminal::LeaveAlternateScreen)?
-        .flush()?;
-
+        terminal::disable_raw_mode()?;
+        out.queue(cursor::Show)?
+            .queue(terminal::LeaveAlternateScreen)?
+            .flush()?;
+    */
     Ok(())
 }
 
@@ -239,6 +243,10 @@ impl Snake {
         &self.head
     }
 
+    pub fn head_mut(&mut self) -> &mut SnakeTile {
+        &mut self.head
+    }
+
     pub fn body(&self) -> &Vec<SnakeTile> {
         &self.body
     }
@@ -248,20 +256,26 @@ impl Snake {
     }
 }
 
-struct SnakeGame {
-    out: Stdout,
+struct SnakeGame<R: SeedableRng + Rng, W: IOWrite> {
+    out: W,
     board: Board,
+    board_width: usize,
+    board_height: usize,
     snake: Snake,
     score: u32,
+    rng: R,
 }
 
-impl SnakeGame {
-    pub fn new(board_width: usize, board_height: usize) -> Self {
+impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
+    pub fn new(board_width: usize, board_height: usize, out: W) -> Self {
         SnakeGame {
-            out: stdout(),
+            out: out,
             board: vec![vec![Tile::Empty; board_width]; board_height],
+            board_width,
+            board_height,
             snake: Snake::new(board_width, board_height),
             score: 0,
+            rng: R::from_entropy(),
         }
     }
 
@@ -287,34 +301,28 @@ impl SnakeGame {
     }
 
     pub fn play(&mut self) -> Result<()> {
-        // let mut out = stdout();
-        let mut rng = rand::thread_rng();
         let mut timer;
         let mut step_time = Duration::ZERO;
 
         loop {
             timer = SystemTime::now();
             for _ in 0..5 {
-                add_food(&mut self.board, &mut rng);
+                self.add_food();
             }
             if self.snake.head().eating {
                 self.score += 1;
             }
             self.add_snake_to_board();
-            draw(
-                &self.board,
-                &mut self.out,
-                &format!(
-                    "step time: {} us\n\r\
+            self.draw(&format!(
+                "step time: {} us\n\r\
             snake length: {}\n\r\
             score: {}",
-                    step_time.as_micros(),
-                    self.snake.len(),
-                    self.score
-                ),
-            )?;
+                step_time.as_micros(),
+                self.snake.len(),
+                self.score
+            ))?;
             self.remove_snake_from_board();
-            let head_direction = match self.snake.head().snake_tile_type {
+            let head_direction = match self.snake.head_mut().snake_tile_type {
                 SnakePart::Head(ref mut direction) => direction,
                 _ => unreachable!(),
             };
@@ -413,16 +421,15 @@ impl SnakeGame {
     // TODO: maybe move this to Snake impl?
     // also if possible this should be simplified
     fn move_snake(&mut self) -> Snake {
-        let mut res = Vec::<SnakeTile>::with_capacity(snake.len());
+        let mut res = Snake::new(self.board_width, self.board_height);
 
         // process snake head
-        let head = snake[0];
         let SnakeTile {
             snake_tile_type,
             mut x,
             mut y,
             eating: _eating,
-        } = head;
+        } = self.snake.head();
         match snake_tile_type {
             SnakePart::Head(direction) => match direction {
                 Direction::Up => y -= 1,
@@ -432,24 +439,24 @@ impl SnakeGame {
             },
             _ => unreachable!(),
         };
-        let eating = if board[usize::from(y)][usize::from(x)] == Tile::Food(FoodType::Blob) {
+        let eating = if self.board[usize::from(y)][usize::from(x)] == Tile::Food(FoodType::Blob) {
             true
         } else {
             false
         };
-        res.push(SnakeTile {
+        res.head = SnakeTile {
             x,
             y,
-            snake_tile_type,
+            snake_tile_type: *snake_tile_type,
             eating,
-        });
+        };
         // TODO: adapt this
         // maybe just shift forward the whole snake body and then deal with head and tail?
-        for i in 1..(snake.len() - 1) {
-            let previous_tile = snake[i - 1];
+        for i in 1..(self.snake.len() - 1) {
+            let previous_tile = self.snake.body()[i - 1];
             let previous_tile_type = previous_tile.snake_tile_type;
             let previous_tile_eating = previous_tile.eating;
-            let tile = snake[i];
+            let tile = self.snake.body()[i];
             let SnakeTile {
                 mut snake_tile_type,
                 mut x,
@@ -538,7 +545,7 @@ impl SnakeGame {
                 SnakePart::Head(_) => unreachable!(),
             }
 
-            res.push(SnakeTile {
+            res.body.push(SnakeTile {
                 x,
                 y,
                 snake_tile_type,
@@ -546,22 +553,21 @@ impl SnakeGame {
             });
         }
 
-        let previous_tile = snake[snake.len() - 2];
-        let tile = snake[snake.len() - 1];
+        let previous_tile = self.snake.body.last().unwrap();
         let SnakeTile {
             mut snake_tile_type,
             mut x,
             mut y,
-            eating: _eating,
-        } = tile;
-        if snake[snake.len() - 1].eating {
-            res.push(previous_tile);
-            res.push(SnakeTile {
+            eating: tail_eating,
+        } = self.snake.tail;
+        if tail_eating {
+            res.body.push(*previous_tile);
+            res.tail = SnakeTile {
                 x,
                 y,
                 snake_tile_type,
                 eating: false,
-            });
+            };
         } else {
             match snake_tile_type {
                 SnakePart::Tail(ref mut direction) => match direction {
@@ -631,18 +637,93 @@ impl SnakeGame {
                 _ => unreachable!(),
             }
 
-            res.push(SnakeTile {
+            res.tail = SnakeTile {
                 x,
                 y,
                 snake_tile_type,
                 eating: previous_tile.eating,
-            });
+            };
         }
 
         res
+    } // TODO: maket his more elegant
+
+    // adds one food particle at random location
+    // food is only added to empty tile
+    fn add_food(&mut self) {
+        if self.count_food_on_board() >= MAX_FOOD_ON_BOARD {
+            return;
+        }
+
+        let height = self.board.len();
+        let width = self.board[0].len();
+        let (a, b): (usize, usize) = self.rng.gen();
+        let (mut x, mut y) = (a % width, b % height);
+
+        // make sure coordinates are on the board
+        // x is width, y is height
+        // (0, 0) is the top left corner
+
+        if self.board[y][x] == Tile::Empty {
+            self.board[y][x] = Tile::Food(FoodType::Blob);
+        } else {
+            // this will loop endlessly if there are no free tiles
+            while self.board[y][x] != Tile::Empty {
+                x = self.rng.gen::<usize>() % width;
+                y = self.rng.gen::<usize>() % height;
+            }
+
+            self.board[y][x] = Tile::Food(FoodType::Blob);
+        }
+    }
+
+    fn draw(&mut self, additional_text: &str) -> Result<()> {
+        // let height = board.len();
+        let width = self.board[0].len();
+
+        // top line of the board
+        let top = "╔".to_owned() + &"═".repeat(width) + "╗";
+        let bottom = "╚".to_owned() + &"═".repeat(width) + "╝";
+        self.out
+            .queue(terminal::Clear(ClearType::All))?
+            .queue(cursor::MoveTo(0, 0))?
+            .queue(Print(format!("{top}\n\r")))?;
+
+        for row in &self.board {
+            self.out.queue(Print(format!(
+                "║{}║\n\r",
+                row.iter()
+                    .fold(String::with_capacity(width), |mut line, tile| {
+                        write!(&mut line, "{}", get_char(tile)).unwrap();
+                        line
+                    })
+            )))?;
+        }
+
+        // bottom line
+        self.out
+            .queue(Print(format!(
+                "{bottom}\n\r\
+         Control the snake with W,A,S,D or arrow keys\n\r\
+         {additional_text}\n\r\
+         Press q to exit..."
+            )))?
+            .flush()?;
+
+        Ok(())
+    }
+
+    fn count_food_on_board(&self) -> u32 {
+        self.board.iter().flatten().fold(0, |count, tile| {
+            if *tile == Tile::Food(FoodType::Blob) {
+                count + 1
+            } else {
+                count
+            }
+        })
     }
 }
-
+/*
 fn game_loop(mut snake: SnakeType, mut board: Board, out: &mut impl IOWrite) -> Result<()> {
     // let mut out = stdout();
     let mut rng = rand::thread_rng();
@@ -1030,7 +1111,7 @@ fn draw(board: &Board, out: &mut impl IOWrite, additional_text: &str) -> Result<
 
     Ok(())
 }
-
+*/
 // snake is drawn using Box Drawing Unicode char block
 fn get_char(tile: &Tile) -> char {
     match *tile {
