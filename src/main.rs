@@ -98,16 +98,16 @@ impl Wrap {
         }
     }
 
-    // increment the number
+    // increment the number, wrap if needed
     fn inc(&mut self) {
         self.number = if self.number == self.modulus - 1 {
             0
         } else {
-            self.number - 1
+            self.number + 1
         }
     }
 
-    // decrement the number
+    // decrement the number, wrap if needed
     fn dec(&mut self) {
         self.number = if self.number == 0 {
             self.modulus - 1
@@ -156,22 +156,27 @@ fn main() -> Result<()> {
 }
 
 // TODO: move game structs and logic to module to make internals private
+#[derive(Debug)]
 struct Snake {
-    head: SnakeTile,
     body: Vec<SnakeTile>,
-    tail: SnakeTile,
 }
 
 impl Snake {
-    pub fn new(board_width: usize, board_height: usize) -> Self {
+    pub fn new() -> Self {
         Snake {
-            head: SnakeTile {
-                x: Wrap::new(10, board_width),
-                y: Wrap::new(10, board_height),
-                snake_tile_type: SnakePart::Head(Direction::Left),
-                eating: false,
-            },
+            body: Vec::with_capacity(100),
+        }
+    }
+
+    pub fn sample_snake(board_width: usize, board_height: usize) -> Self {
+        Snake {
             body: vec![
+                SnakeTile {
+                    x: Wrap::new(10, board_width),
+                    y: Wrap::new(10, board_height),
+                    snake_tile_type: SnakePart::Head(Direction::Left),
+                    eating: false,
+                },
                 SnakeTile {
                     x: Wrap::new(11, board_width),
                     y: Wrap::new(10, board_height),
@@ -196,34 +201,34 @@ impl Snake {
                     snake_tile_type: SnakePart::Body(BodyPartDirection::BottomLeftCornerUp),
                     eating: false,
                 },
+                SnakeTile {
+                    x: Wrap::new(12, board_width),
+                    y: Wrap::new(13, board_height),
+                    snake_tile_type: SnakePart::Tail(Direction::Left),
+                    eating: false,
+                },
             ],
-            tail: SnakeTile {
-                x: Wrap::new(12, board_width),
-                y: Wrap::new(13, board_height),
-                snake_tile_type: SnakePart::Tail(Direction::Left),
-                eating: false,
-            },
         }
     }
 
     pub fn len(&self) -> usize {
-        self.body.len() + 2
+        self.body.len()
     }
 
     pub fn head(&self) -> &SnakeTile {
-        &self.head
+        &self.body[0]
+    }
+
+    pub fn last(&self) -> &SnakeTile {
+        &self.body.last().unwrap()
     }
 
     pub fn head_mut(&mut self) -> &mut SnakeTile {
-        &mut self.head
+        &mut self.body[0]
     }
 
-    pub fn body(&self) -> &Vec<SnakeTile> {
+    pub fn whole_snake(&self) -> &Vec<SnakeTile> {
         &self.body
-    }
-
-    pub fn tail(&self) -> &SnakeTile {
-        &self.tail
     }
 }
 
@@ -244,7 +249,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
             board: vec![vec![Tile::Empty; board_width]; board_height],
             board_width,
             board_height,
-            snake: Snake::new(board_width, board_height),
+            snake: Snake::sample_snake(board_width, board_height),
             score: 0,
             rng: R::from_entropy(),
         }
@@ -359,46 +364,29 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
     }
 
     fn add_snake_to_board(&mut self) {
-        // head
-        let head = self.snake.head();
-        self.board[usize::from(head.y)][usize::from(head.x)] =
-            Tile::SnakePart(head.snake_tile_type, head.eating);
-        // tail
-        let tail = self.snake.tail();
-        self.board[usize::from(tail.y)][usize::from(tail.x)] =
-            Tile::SnakePart(tail.snake_tile_type, tail.eating);
-        // body
-        for tile in self.snake.body() {
+        for tile in self.snake.whole_snake() {
             self.board[usize::from(tile.y)][usize::from(tile.x)] =
                 Tile::SnakePart(tile.snake_tile_type, tile.eating);
         }
     }
 
     fn remove_snake_from_board(&mut self) {
-        // head
-        let head = self.snake.head();
-        self.board[usize::from(head.y)][usize::from(head.x)] = Tile::Empty;
-        // tail
-        let tail = self.snake.tail();
-        self.board[usize::from(tail.y)][usize::from(tail.x)] = Tile::Empty;
-        // body
-        for tile in self.snake.body() {
+        for tile in self.snake.whole_snake() {
             self.board[usize::from(tile.y)][usize::from(tile.x)] = Tile::Empty;
         }
     }
 
     // player controls already applied to the head
-    // snake wraps around board edges
     // also if possible this should be simplified
     fn move_snake(&mut self) -> Snake {
-        let mut res = Snake::new(self.board_width, self.board_height);
+        let mut res = Snake::new();
 
         // process snake head
         let SnakeTile {
             snake_tile_type,
             mut x,
             mut y,
-            eating: _, // TODO: use this info for following snake tiles
+            eating: _,
         } = self.snake.head();
         match snake_tile_type {
             SnakePart::Head(direction) => match direction {
@@ -410,25 +398,23 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
             _ => unreachable!(),
         };
         let eating = self.board[usize::from(y)][usize::from(x)].has_food();
-        res.head = SnakeTile {
+        res.body.push(SnakeTile {
             x,
             y,
             snake_tile_type: *snake_tile_type,
             eating,
-        };
-        // TODO: adapt this
-        // maybe just shift forward the whole snake body and then deal with head and tail?
-        for i in 1..(self.snake.body().len() - 1) {
-            let previous_tile = self.snake.body()[i - 1];
+        });
+
+        let snake = self.snake.whole_snake();
+        for i in 1..=(snake.len() - 2) {
+            let previous_tile = snake[i - 1];
             let previous_tile_type = previous_tile.snake_tile_type;
-            let previous_tile_eating = previous_tile.eating;
-            let tile = self.snake.body()[i];
             let SnakeTile {
                 mut snake_tile_type,
                 mut x,
                 mut y,
-                eating: _eating,
-            } = tile;
+                eating: _,
+            } = snake[i];
 
             match snake_tile_type {
                 SnakePart::Body(ref mut direction) => match direction {
@@ -515,27 +501,30 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                 x,
                 y,
                 snake_tile_type,
-                eating: previous_tile_eating,
+                eating: previous_tile.eating,
             });
         }
 
-        let previous_tile = self.snake.body.last().unwrap();
+        // process snake tail
+        let previous_tile = snake[snake.len() - 2];
+        // tail
         let SnakeTile {
-            mut snake_tile_type,
+            snake_tile_type: mut tail_tile_type,
             mut x,
             mut y,
             eating: tail_eating,
-        } = self.snake.tail;
-        if tail_eating {
-            res.body.push(*previous_tile);
-            res.tail = SnakeTile {
+        } = snake.last().unwrap();
+
+        if *tail_eating {
+            res.body.push(previous_tile);
+            res.body.push(SnakeTile {
                 x,
                 y,
-                snake_tile_type,
+                snake_tile_type: tail_tile_type,
                 eating: false,
-            };
+            });
         } else {
-            match snake_tile_type {
+            match tail_tile_type {
                 SnakePart::Tail(ref mut direction) => match direction {
                     Direction::Up => {
                         y.dec();
@@ -603,16 +592,16 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                 _ => unreachable!(),
             }
 
-            res.tail = SnakeTile {
+            res.body.push(SnakeTile {
                 x,
                 y,
-                snake_tile_type,
+                snake_tile_type: tail_tile_type,
                 eating: previous_tile.eating,
-            };
+            });
         }
 
         res
-    } // TODO: maket his more elegant
+    }
 
     // adds one food particle at random location
     // food is only added to empty tile
