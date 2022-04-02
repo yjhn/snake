@@ -18,7 +18,7 @@ const BOARD_WIDTH: usize = 50;
 const BOARD_HEIGHT: usize = 20;
 const STEP_LENGTH: u64 = 300;
 const GAME_STEP_LENGTH: Duration = Duration::from_millis(STEP_LENGTH);
-const MAX_FOOD_ON_BOARD: u32 = 20;
+const MAX_FOOD_ON_BOARD: usize = 20;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Direction {
@@ -50,6 +50,16 @@ enum Tile {
     Food(FoodType), // variable is for the type of food
     //Obstacle,
     SnakePart(SnakePart, bool),
+}
+
+impl Tile {
+    fn is_empty(&self) -> bool {
+        *self == Tile::Empty
+    }
+
+    fn has_food(&self) -> bool {
+        matches!(*self, Tile::Food(_))
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -87,15 +97,32 @@ impl Wrap {
             number: number % modulus,
         }
     }
+
+    // increment the number
+    fn inc(&mut self) {
+        self.number = if self.number == self.modulus - 1 {
+            0
+        } else {
+            self.number - 1
+        }
+    }
+
+    // decrement the number
+    fn dec(&mut self) {
+        self.number = if self.number == 0 {
+            self.modulus - 1
+        } else {
+            self.number - 1
+        }
+    }
 }
 
-// only supports += 1
 impl AddAssign<usize> for Wrap {
     fn add_assign(&mut self, rhs: usize) {
         self.number = if self.number + rhs == self.modulus {
             0
         } else {
-            self.number + rhs
+            (self.number + rhs) % self.modulus
         }
     }
 }
@@ -372,22 +399,18 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
             snake_tile_type,
             mut x,
             mut y,
-            eating: _eating,
+            eating: _, // TODO: use this info for following snake tiles
         } = self.snake.head();
         match snake_tile_type {
             SnakePart::Head(direction) => match direction {
-                Direction::Up => y -= 1,
-                Direction::Right => x += 1,
-                Direction::Down => y += 1,
-                Direction::Left => x -= 1,
+                Direction::Up => y.dec(),
+                Direction::Right => x.inc(),
+                Direction::Down => y.inc(),
+                Direction::Left => x.dec(),
             },
             _ => unreachable!(),
         };
-        let eating = if self.board[usize::from(y)][usize::from(x)] == Tile::Food(FoodType::Blob) {
-            true
-        } else {
-            false
-        };
+        let eating = self.board[usize::from(y)][usize::from(x)] == Tile::Food(FoodType::Blob);
         res.head = SnakeTile {
             x,
             y,
@@ -396,7 +419,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
         };
         // TODO: adapt this
         // maybe just shift forward the whole snake body and then deal with head and tail?
-        for i in 1..(self.snake.len() - 1) {
+        for i in 1..(self.snake.body().len() - 1) {
             let previous_tile = self.snake.body()[i - 1];
             let previous_tile_type = previous_tile.snake_tile_type;
             let previous_tile_eating = previous_tile.eating;
@@ -413,7 +436,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                     BodyPartDirection::Up
                     | BodyPartDirection::BottomLeftCornerUp
                     | BodyPartDirection::BottomRightCornerUp => {
-                        y -= 1;
+                        y.dec();
                         match previous_tile_type {
                             SnakePart::Head(dir) => match dir {
                                 Direction::Up => *direction = BodyPartDirection::Up,
@@ -432,7 +455,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                     BodyPartDirection::Down
                     | BodyPartDirection::TopLeftCornerDown
                     | BodyPartDirection::TopRightCornerDown => {
-                        y += 1;
+                        y.inc();
                         match previous_tile_type {
                             SnakePart::Head(dir) => match dir {
                                 Direction::Down => *direction = BodyPartDirection::Down,
@@ -451,7 +474,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                     BodyPartDirection::Left
                     | BodyPartDirection::TopRightCornerLeft
                     | BodyPartDirection::BottomRightCornerLeft => {
-                        x -= 1;
+                        x.dec();
                         match previous_tile_type {
                             SnakePart::Head(dir) => match dir {
                                 Direction::Up => *direction = BodyPartDirection::BottomLeftCornerUp,
@@ -468,7 +491,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                     BodyPartDirection::Right
                     | BodyPartDirection::TopLeftCornerRight
                     | BodyPartDirection::BottomLeftCornerRight => {
-                        x += 1;
+                        x.inc();
                         match previous_tile_type {
                             SnakePart::Head(dir) => match dir {
                                 Direction::Up => {
@@ -516,7 +539,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
             match snake_tile_type {
                 SnakePart::Tail(ref mut direction) => match direction {
                     Direction::Up => {
-                        y -= 1;
+                        y.dec();
                         match previous_tile.snake_tile_type {
                             SnakePart::Body(dir) => match dir {
                                 BodyPartDirection::Up => (),
@@ -532,7 +555,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                         }
                     }
                     Direction::Right => {
-                        x += 1;
+                        x.inc();
                         match previous_tile.snake_tile_type {
                             SnakePart::Body(dir) => match dir {
                                 BodyPartDirection::Right => (),
@@ -548,7 +571,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                         }
                     }
                     Direction::Down => {
-                        y += 1;
+                        y.inc();
                         match previous_tile.snake_tile_type {
                             SnakePart::Body(dir) => match dir {
                                 BodyPartDirection::Down => (),
@@ -564,7 +587,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                         }
                     }
                     Direction::Left => {
-                        x -= 1;
+                        x.dec();
                         match previous_tile.snake_tile_type {
                             SnakePart::Body(dir) => match dir {
                                 BodyPartDirection::Left => (),
@@ -595,7 +618,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
     // adds one food particle at random location
     // food is only added to empty tile
     fn add_food(&mut self) {
-        if self.count_food_on_board() >= MAX_FOOD_ON_BOARD {
+        if self.count_food_on_board() >= MAX_FOOD_ON_BOARD || self.is_board_full() {
             return;
         }
 
@@ -603,10 +626,6 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
         let width = self.board[0].len();
         let (a, b): (usize, usize) = self.rng.gen();
         let (mut x, mut y) = (a % width, b % height);
-
-        // make sure coordinates are on the board
-        // x is width, y is height
-        // (0, 0) is the top left corner
 
         if self.board[y][x] == Tile::Empty {
             self.board[y][x] = Tile::Food(FoodType::Blob);
@@ -657,14 +676,16 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
         Ok(())
     }
 
-    fn count_food_on_board(&self) -> u32 {
-        self.board.iter().flatten().fold(0, |count, tile| {
-            if *tile == Tile::Food(FoodType::Blob) {
-                count + 1
-            } else {
-                count
-            }
-        })
+    fn count_food_on_board(&self) -> usize {
+        self.board
+            .iter()
+            .flatten()
+            .filter(|tile| tile.has_food())
+            .count()
+    }
+
+    fn is_board_full(&self) -> bool {
+        !self.board.iter().flatten().any(|tile| tile.is_empty())
     }
 }
 
