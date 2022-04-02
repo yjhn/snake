@@ -357,7 +357,8 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                 }
             }
 
-            self.snake = self.move_snake();
+            // self.snake = self.move_snake();
+            self.move_snake_experimental();
         }
 
         Ok(())
@@ -601,6 +602,138 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
         }
 
         res
+    }
+
+    fn move_snake_experimental(&mut self) {
+        // move head
+        let SnakeTile {
+            mut x,
+            mut y,
+            snake_tile_type,
+            eating: mut head_eating,
+        } = self.snake.body[0];
+
+        let old_head_x = x;
+        let old_head_y = y;
+        let head_direction = match snake_tile_type {
+            SnakePart::Head(direction) => match direction {
+                Direction::Up => {
+                    y.dec();
+                    Direction::Up
+                }
+                Direction::Right => {
+                    x.inc();
+                    Direction::Right
+                }
+                Direction::Down => {
+                    y.inc();
+                    Direction::Down
+                }
+                Direction::Left => {
+                    x.dec();
+                    Direction::Left
+                }
+            },
+            _ => unreachable!(),
+        };
+        let old_head_eating = head_eating;
+        head_eating = self.board[usize::from(y)][usize::from(x)].has_food();
+
+        // push all snake tiles forward in snake vec
+        self.snake.body.rotate_right(1);
+
+        // copy tail
+        let tail = self.snake.body[0];
+        if tail.eating {
+            // push tail to the end
+            self.snake.body.push(SnakeTile {
+                eating: false,
+                ..tail
+            });
+        } else {
+            // tail replaces the last tile
+            let last = self.snake.body.last().unwrap();
+            let direction = match last.snake_tile_type {
+                SnakePart::Body(direction) => match direction {
+                    BodyPartDirection::BottomLeftCornerRight
+                    | BodyPartDirection::Right
+                    | BodyPartDirection::TopLeftCornerRight => Direction::Right,
+                    BodyPartDirection::BottomLeftCornerUp
+                    | BodyPartDirection::Up
+                    | BodyPartDirection::BottomRightCornerUp => Direction::Up,
+                    BodyPartDirection::Down
+                    | BodyPartDirection::TopLeftCornerDown
+                    | BodyPartDirection::TopRightCornerDown => Direction::Down,
+                    BodyPartDirection::Left
+                    | BodyPartDirection::TopRightCornerLeft
+                    | BodyPartDirection::BottomRightCornerLeft => Direction::Left,
+                },
+                _ => unreachable!(),
+            };
+
+            *self.snake.body.last_mut().unwrap() = SnakeTile {
+                x: last.x,
+                y: last.y,
+                snake_tile_type: SnakePart::Tail(direction),
+                eating: last.eating,
+            };
+        }
+
+        // move head to the start
+        self.snake.body[0] = SnakeTile {
+            x,
+            y,
+            snake_tile_type,
+            eating: head_eating,
+        };
+
+        // add tile after the head that connects the head
+        // to the body
+        let end_tile_type = self.snake.body[2].snake_tile_type;
+        let direction = match end_tile_type {
+            SnakePart::Body(direction) => match direction {
+                BodyPartDirection::BottomLeftCornerRight
+                | BodyPartDirection::Right
+                | BodyPartDirection::TopLeftCornerRight => match head_direction {
+                    Direction::Up => BodyPartDirection::BottomRightCornerUp,
+                    Direction::Down => BodyPartDirection::TopRightCornerDown,
+                    Direction::Right => BodyPartDirection::Right,
+                    Direction::Left => unreachable!(),
+                },
+                BodyPartDirection::BottomLeftCornerUp
+                | BodyPartDirection::Up
+                | BodyPartDirection::BottomRightCornerUp => match head_direction {
+                    Direction::Up => BodyPartDirection::Up,
+                    Direction::Left => BodyPartDirection::TopRightCornerLeft,
+                    Direction::Right => BodyPartDirection::TopLeftCornerRight,
+                    Direction::Down => unreachable!(),
+                },
+                BodyPartDirection::Down
+                | BodyPartDirection::TopLeftCornerDown
+                | BodyPartDirection::TopRightCornerDown => match head_direction {
+                    Direction::Left => BodyPartDirection::BottomRightCornerLeft,
+                    Direction::Right => BodyPartDirection::BottomLeftCornerRight,
+                    Direction::Down => BodyPartDirection::Down,
+                    Direction::Up => unreachable!(),
+                },
+                BodyPartDirection::Left
+                | BodyPartDirection::TopRightCornerLeft
+                | BodyPartDirection::BottomRightCornerLeft => match head_direction {
+                    Direction::Up => BodyPartDirection::BottomLeftCornerUp,
+                    Direction::Down => BodyPartDirection::TopLeftCornerDown,
+                    Direction::Left => BodyPartDirection::Left,
+                    Direction::Right => unreachable!(),
+                },
+            },
+            _ => unreachable!(),
+        };
+
+        self.snake.body[1] = SnakeTile {
+            x: old_head_x,
+            y: old_head_y,
+            snake_tile_type: SnakePart::Body(direction),
+            eating: old_head_eating,
+        };
     }
 
     // adds one food particle at random location
