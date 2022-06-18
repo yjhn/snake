@@ -220,7 +220,7 @@ impl Snake {
     }
 
     pub fn last(&self) -> &SnakeTile {
-        &self.body.last().unwrap()
+        self.body.last().unwrap()
     }
 
     pub fn head_mut(&mut self) -> &mut SnakeTile {
