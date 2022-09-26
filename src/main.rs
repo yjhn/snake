@@ -353,7 +353,7 @@ impl<R: SeedableRng + Rng, W: IOWrite> SnakeGame<R, W> {
                         print!("new terminal size: {x}, {y}\n\r");
                         std::thread::sleep(Duration::from_secs(1));
                     }
-                    Event::Mouse(_) => unreachable!("disabled in crossterm by default"),
+                    _ => unreachable!(),
                 }
             }
 
