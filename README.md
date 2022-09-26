@@ -4,8 +4,8 @@ This is a simple terminal snake game.
 
 # Controls
 
-Use <key>W</key>, <key>A</key>, <key>S</key>, <key>D</key> or arrow keys
-to control movement direction, <key>q</key> to quit
+Use <kbd>W</kbd>, <kbd>A</kbd>, <kbd>S</kbd>, <kbd>D</kbd> or arrow keys
+to control movement direction, <kbd>q</kbd> to quit
 
 # Compiling and running
 
